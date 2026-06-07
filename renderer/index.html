@@ -35,6 +35,7 @@
           <div class="app-title">UniM3U</div>
           <div class="header-actions">
             <button id="countries-btn" title="Choose countries">🌐</button>
+            <button id="reload-btn" title="Reload playlist">↻</button>
             <button id="settings-btn" title="Settings">⚙</button>
           </div>
         </div>
@@ -90,6 +91,20 @@
       </div>
       <div id="countries-checklist"></div>
       <button id="countries-save" class="btn-primary">Save</button>
+    </div>
+  </div>
+
+  <!-- Reload confirmation -->
+  <div id="reload-modal" class="modal-overlay hidden">
+    <div class="modal modal-confirm">
+      <div class="modal-header">
+        <h3>Reload playlist?</h3>
+      </div>
+      <p class="modal-message">This re-downloads the full channel list from your provider and may take a moment.</p>
+      <div class="modal-buttons">
+        <button id="reload-cancel" class="btn-secondary">Cancel</button>
+        <button id="reload-confirm" class="btn-primary">Reload</button>
+      </div>
     </div>
   </div>
 

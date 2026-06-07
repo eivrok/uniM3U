@@ -33,6 +33,10 @@ const saveBtn = document.getElementById('save-settings-btn');
 const cancelBtn = document.getElementById('cancel-settings-btn');
 const settingsBtn = document.getElementById('settings-btn');
 const countriesBtn = document.getElementById('countries-btn');
+const reloadBtn = document.getElementById('reload-btn');
+const reloadModal = document.getElementById('reload-modal');
+const reloadCancel = document.getElementById('reload-cancel');
+const reloadConfirm = document.getElementById('reload-confirm');
 const searchInput = document.getElementById('search-input');
 const channelList = document.getElementById('channel-list');
 const loadingMsg = document.getElementById('loading-msg');
@@ -647,11 +651,41 @@ cancelBtn.addEventListener('click', () => {
 
 settingsBtn.addEventListener('click', showSettings);
 
-// Escape closes whichever overlay is open (countries modal first, then settings
-// if channels are loaded).
+// --- Reload (force re-download playlist), behind a confirmation ---
+function openReloadModal() {
+  reloadModal.classList.remove('hidden');
+}
+function closeReloadModal() {
+  reloadModal.classList.add('hidden');
+}
+
+async function doReload() {
+  closeReloadModal();
+  const m3uUrl = await api.storeGet('m3uUrl');
+  if (!m3uUrl) return;
+  const epgUrl = await api.storeGet('epgUrl');
+  reloadBtn.classList.add('spinning');
+  try {
+    await loadChannels(m3uUrl, epgUrl || null, true);
+  } finally {
+    reloadBtn.classList.remove('spinning');
+  }
+}
+
+reloadBtn.addEventListener('click', openReloadModal);
+reloadCancel.addEventListener('click', closeReloadModal);
+reloadConfirm.addEventListener('click', doReload);
+reloadModal.addEventListener('click', (e) => {
+  if (e.target === reloadModal) closeReloadModal();
+});
+
+// Escape closes whichever overlay is open (reload confirm, then countries modal,
+// then settings if channels are loaded).
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
-  if (!countriesModal.classList.contains('hidden')) {
+  if (!reloadModal.classList.contains('hidden')) {
+    closeReloadModal();
+  } else if (!countriesModal.classList.contains('hidden')) {
     closeCountriesModal();
   } else if (!settingsScreen.classList.contains('hidden') && state.channels.length > 0) {
     showMain();
