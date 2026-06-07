@@ -21,6 +21,7 @@ const state = {
   activeGroup: null,          // group-title string when view === 'channels'
   expandedCountries: new Set(),
   visibleCountries: null,     // null = all visible; otherwise a Set of allowed country names
+  tree: null,                 // memoized country tree; rebuilt only when channels reload
 };
 
 // --- DOM refs ---
@@ -29,6 +30,7 @@ const mainScreen = document.getElementById('main-screen');
 const m3uInput = document.getElementById('m3u-url-input');
 const epgInput = document.getElementById('epg-url-input');
 const saveBtn = document.getElementById('save-settings-btn');
+const cancelBtn = document.getElementById('cancel-settings-btn');
 const settingsBtn = document.getElementById('settings-btn');
 const countriesBtn = document.getElementById('countries-btn');
 const searchInput = document.getElementById('search-input');
@@ -50,7 +52,29 @@ const countriesNoneBtn = document.getElementById('countries-none');
 const countriesChecklist = document.getElementById('countries-checklist');
 const countriesSave = document.getElementById('countries-save');
 
-const player = new Player(document.getElementById('video-player'));
+const videoEl = document.getElementById('video-player');
+const player = new Player(videoEl);
+
+// --- Channel-load spinner ---
+const playerLoading = document.getElementById('player-loading');
+let spinnerTimer = null;
+
+function showSpinner() {
+  playerLoading.classList.remove('hidden');
+  clearTimeout(spinnerTimer);
+  // Safety: a dead stream (or an mpegts.js error that never reaches the <video>
+  // element) would otherwise spin forever.
+  spinnerTimer = setTimeout(hideSpinner, 15000);
+}
+
+function hideSpinner() {
+  clearTimeout(spinnerTimer);
+  playerLoading.classList.add('hidden');
+}
+
+videoEl.addEventListener('playing', hideSpinner);
+videoEl.addEventListener('waiting', () => playerLoading.classList.remove('hidden'));
+videoEl.addEventListener('error', hideSpinner);
 
 // --- Toast ---
 const toast = document.createElement('div');
@@ -63,6 +87,14 @@ function showToast(msg, duration = 3000) {
   setTimeout(() => toast.classList.remove('show'), duration);
 }
 
+function debounce(fn, ms) {
+  let timer;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), ms);
+  };
+}
+
 // --- Init ---
 async function init() {
   const m3uUrl = await api.storeGet('m3uUrl');
@@ -70,10 +102,12 @@ async function init() {
   const favs = await api.storeGet('favorites');
   const vis = await api.storeGet('visibleCountries');
   const exp = await api.storeGet('expandedCountries');
+  const fl = await api.storeGet('failedLogos');
 
   if (favs) state.favorites = new Set(favs);
   state.visibleCountries = Array.isArray(vis) ? new Set(vis) : null;
   if (Array.isArray(exp)) state.expandedCountries = new Set(exp);
+  if (Array.isArray(fl)) failedLogos = new Set(fl);
 
   if (m3uUrl) {
     m3uInput.value = m3uUrl;
@@ -86,6 +120,9 @@ async function init() {
 }
 
 function showSettings() {
+  // Cancel only makes sense once channels are loaded — on first run there's
+  // nothing to go back to.
+  cancelBtn.classList.toggle('hidden', state.channels.length === 0);
   settingsScreen.classList.remove('hidden');
   mainScreen.classList.add('hidden');
 }
@@ -119,6 +156,16 @@ async function loadChannels(m3uUrl, epgUrl, forceRefresh = false) {
 
     loadingMsg.textContent = 'Parsing channels…';
     state.channels = parseM3U(raw).filter((c) => c.url && !/^=+/.test(c.name.trim()));
+
+    // Precompute country/sub once per channel (#4) so search and tree-building
+    // don't re-run parseGroup on every render. Normalize group here too.
+    for (const c of state.channels) {
+      c.group = c.group || 'Uncategorized';
+      const { country, sub } = parseGroup(c.group);
+      c.country = country;
+      c.sub = sub;
+    }
+    state.tree = null; // invalidate memoized tree (#3)
 
     // Load EPG in background
     if (epgUrl) {
@@ -154,13 +201,12 @@ function isCountryVisible(country) {
 function buildCountryTree(channels) {
   const map = new Map();
   for (const c of channels) {
-    const { country, sub } = parseGroup(c.group);
+    const country = c.country;
     if (!map.has(country)) map.set(country, { country, count: 0, subs: new Map() });
     const node = map.get(country);
     node.count++;
-    const group = c.group || 'Uncategorized';
-    if (!node.subs.has(group)) node.subs.set(group, { sub, group, count: 0 });
-    node.subs.get(group).count++;
+    if (!node.subs.has(c.group)) node.subs.set(c.group, { sub: c.sub, group: c.group, count: 0 });
+    node.subs.get(c.group).count++;
   }
 
   return [...map.values()]
@@ -176,8 +222,16 @@ function buildCountryTree(channels) {
     });
 }
 
+// Memoized accessor — the tree only changes when channels reload (#3).
+function getCountryTree() {
+  if (!state.tree) state.tree = buildCountryTree(state.channels);
+  return state.tree;
+}
+
 // --- Render ---
 const RENDER_LIMIT = 500;
+let failedLogos = new Set(); // logo URLs that 404'd — don't re-request on re-render
+const persistFailedLogos = debounce(() => api.storeSet('failedLogos', [...failedLogos]), 1000);
 
 function render() {
   channelList.innerHTML = '';
@@ -186,7 +240,7 @@ function render() {
   // Search cuts across all visible channels, ignoring drill/collapse state.
   if (q) {
     const results = state.channels.filter(
-      (c) => isCountryVisible(parseGroup(c.group).country) && c.name.toLowerCase().includes(q)
+      (c) => isCountryVisible(c.country) && c.name.toLowerCase().includes(q)
     );
     renderChannelItems(results, 'No channels match your search');
     return;
@@ -202,7 +256,7 @@ function render() {
   // Drilled into a subcategory.
   if (state.view === 'channels' && state.activeGroup) {
     renderBackHeader(state.activeGroup);
-    const list = state.channels.filter((c) => (c.group || 'Uncategorized') === state.activeGroup);
+    const list = state.channels.filter((c) => c.group === state.activeGroup);
     renderChannelItems(list, 'No channels here', true);
     return;
   }
@@ -212,7 +266,7 @@ function render() {
 }
 
 function renderBrowse() {
-  const tree = buildCountryTree(state.channels).filter((n) => isCountryVisible(n.country));
+  const tree = getCountryTree().filter((n) => isCountryVisible(n.country));
 
   if (tree.length === 0) {
     renderHint('No countries selected — pick some with 🌐');
@@ -318,13 +372,25 @@ function buildChannelItem(channel, epgData) {
   if (channel.id === state.activeChannelId) item.classList.add('active');
   item.dataset.id = channel.id;
 
-  // Logo
-  if (channel.logo) {
+  // Logo — lazy + async so a 500-row category doesn't fire 500 remote
+  // image fetches on render. width/height match the CSS box to avoid reflow.
+  // Only http(s) URLs (skips garbage/relative tvg-logo values that would 404
+  // against the file:// base), and skip URLs already known to fail so re-renders
+  // (e.g. every search keystroke) don't re-request dead logos.
+  if (channel.logo && /^https?:\/\//i.test(channel.logo) && !failedLogos.has(channel.logo)) {
     const img = document.createElement('img');
     img.className = 'channel-logo';
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    img.width = 36;
+    img.height = 36;
     img.src = channel.logo;
     img.alt = '';
-    img.onerror = () => img.replaceWith(logoPlaceholder());
+    img.onerror = () => {
+      failedLogos.add(channel.logo);
+      persistFailedLogos();
+      img.replaceWith(logoPlaceholder());
+    };
     item.appendChild(img);
   } else {
     item.appendChild(logoPlaceholder());
@@ -399,7 +465,7 @@ function goBack() {
 
 // --- Countries whitelist modal ---
 function openCountriesModal() {
-  const tree = buildCountryTree(state.channels);
+  const tree = getCountryTree();
   countriesChecklist.innerHTML = '';
 
   for (const node of tree) {
@@ -464,6 +530,7 @@ function playChannel(channel) {
   emptyState.style.display = 'none';
   channelNameEl.textContent = channel.name;
 
+  showSpinner();
   player.load(channel.url);
   updateEPGOverlay(channel);
 }
@@ -490,9 +557,9 @@ function updateEPGOverlay(channel) {
   }
 }
 
-function formatTime(date) {
-  if (!date) return '';
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+function formatTime(ms) {
+  if (!ms) return '';
+  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
 // --- Favorites ---
@@ -512,6 +579,11 @@ saveBtn.addEventListener('click', async () => {
   const epgUrl = epgInput.value.trim();
   if (!m3uUrl) { alert('Please enter an M3U URL'); return; }
 
+  const oldM3u = (await api.storeGet('m3uUrl')) || '';
+  const oldEpg = (await api.storeGet('epgUrl')) || '';
+  const m3uChanged = m3uUrl !== oldM3u;
+  const epgChanged = (epgUrl || '') !== oldEpg;
+
   saveBtn.disabled = true;
   saveBtn.textContent = 'Loading…';
 
@@ -520,7 +592,15 @@ saveBtn.addEventListener('click', async () => {
     await api.storeSet('epgUrl', epgUrl || null);
 
     showMain();
-    await loadChannels(m3uUrl, epgUrl || null, true); // force refresh on settings save
+
+    if (state.channels.length === 0 || m3uChanged) {
+      // First load, or the playlist URL changed → re-download.
+      await loadChannels(m3uUrl, epgUrl || null, true);
+    } else if (epgChanged) {
+      // Only EPG changed → keep cached playlist, refetch EPG.
+      await loadChannels(m3uUrl, epgUrl || null, false);
+    }
+    // Nothing changed → just return to the player, no download.
   } catch (err) {
     alert('Error: ' + err.message);
   } finally {
@@ -529,11 +609,30 @@ saveBtn.addEventListener('click', async () => {
   }
 });
 
+cancelBtn.addEventListener('click', () => {
+  // Restore the inputs to the saved values, discard edits, return to player.
+  api.storeGet('m3uUrl').then((v) => { m3uInput.value = v || ''; });
+  api.storeGet('epgUrl').then((v) => { epgInput.value = v || ''; });
+  showMain();
+});
+
 settingsBtn.addEventListener('click', showSettings);
 
+// Escape closes whichever overlay is open (countries modal first, then settings
+// if channels are loaded).
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (!countriesModal.classList.contains('hidden')) {
+    closeCountriesModal();
+  } else if (!settingsScreen.classList.contains('hidden') && state.channels.length > 0) {
+    showMain();
+  }
+});
+
+const debouncedRender = debounce(render, 150);
 searchInput.addEventListener('input', (e) => {
-  state.searchQuery = e.target.value;
-  render();
+  state.searchQuery = e.target.value; // keep value current; defer the expensive render
+  debouncedRender();
 });
 
 categoryTabs.addEventListener('click', (e) => {
