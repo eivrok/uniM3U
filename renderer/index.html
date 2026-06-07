@@ -20,6 +20,17 @@
         <label>EPG URL (optional)
           <input type="text" id="epg-url-input" placeholder="http://example.com/xmltv.php?username=..." />
         </label>
+        <label>Re-download playlist
+          <select id="cache-ttl-select">
+            <option value="0">Every launch</option>
+            <option value="6">After 6 hours</option>
+            <option value="12">After 12 hours</option>
+            <option value="24">After 24 hours</option>
+            <option value="168">After 7 days</option>
+            <option value="-1">Only when I refresh manually</option>
+          </select>
+        </label>
+        <p class="settings-note" id="last-download-note"></p>
         <div class="settings-actions">
           <button id="cancel-settings-btn" class="btn-secondary hidden">Cancel</button>
           <button id="save-settings-btn" class="btn-primary">Save & Load Channels</button>
