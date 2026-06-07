@@ -1,11 +1,14 @@
 {
-  "name": "iptv-player",
+  "name": "unim3u",
   "version": "1.0.0",
-  "description": "macOS IPTV Player",
+  "description": "UniM3U — a fast M3U IPTV player",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build": "electron-builder --mac",
+    "build": "electron-builder",
+    "build:mac": "electron-builder --mac",
+    "build:win": "electron-builder --win",
+    "build:linux": "electron-builder --linux",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -20,11 +23,21 @@
     "mpegts.js": "^1.8.0"
   },
   "build": {
-    "appId": "com.eivind.iptv-player",
-    "productName": "IPTV Player",
+    "appId": "com.eivind.unim3u",
+    "productName": "UniM3U",
+    "extraResources": [
+      "THIRD-PARTY-LICENSES.txt"
+    ],
     "mac": {
       "category": "public.app-category.entertainment",
       "target": "dmg"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "AudioVideo"
     }
   }
 }
