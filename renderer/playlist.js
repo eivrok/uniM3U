@@ -29,7 +29,7 @@ function parseExtInf(line, fallbackId) {
   const attrs = line.slice(0, commaIdx >= 0 ? commaIdx : line.length);
 
   return {
-    id: attr(attrs, 'tvg-id') || attr(attrs, 'tvg-name') || `ch-${fallbackId}`,
+    id: `ch-${fallbackId}`, // unique per channel; tvg-id is unreliable (SD/HD share one)
     name,
     tvgId: attr(attrs, 'tvg-id'),
     tvgName: attr(attrs, 'tvg-name'),
@@ -43,4 +43,16 @@ function attr(str, name) {
   const re = new RegExp(`${name}="([^"]*)"`, 'i');
   const m = str.match(re);
   return m ? m[1].trim() : null;
+}
+
+/**
+ * Splits a group-title into country + subcategory on the first " - ".
+ * "SWEDEN - SPORT" -> { country: "SWEDEN", sub: "SPORT" }
+ * "24-7 Channels"  -> { country: "24-7 Channels", sub: null }
+ */
+export function parseGroup(group) {
+  const g = (group || 'Uncategorized').trim();
+  const idx = g.indexOf(' - ');
+  if (idx === -1) return { country: g, sub: null };
+  return { country: g.slice(0, idx).trim(), sub: g.slice(idx + 3).trim() };
 }
