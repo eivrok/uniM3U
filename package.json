@@ -25,6 +25,9 @@
   "build": {
     "appId": "com.eivind.unim3u",
     "productName": "UniM3U",
+    "publish": {
+      "provider": "github"
+    },
     "extraResources": [
       "THIRD-PARTY-LICENSES.txt"
     ],
