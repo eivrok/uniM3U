@@ -1,5 +1,6 @@
 node_modules/
 dist/
+docs/
 *.log
 .DS_Store
 
@@ -7,3 +8,6 @@ dist/
 *.m3u
 *.m3u8
 *.xmltv
+
+# other
+

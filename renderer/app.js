@@ -29,16 +29,23 @@ const settingsScreen = document.getElementById('settings-screen');
 const mainScreen = document.getElementById('main-screen');
 const m3uInput = document.getElementById('m3u-url-input');
 const epgInput = document.getElementById('epg-url-input');
+const cacheTtlSelect = document.getElementById('cache-ttl-select');
+const lastDownloadNote = document.getElementById('last-download-note');
 const saveBtn = document.getElementById('save-settings-btn');
 const cancelBtn = document.getElementById('cancel-settings-btn');
 const settingsBtn = document.getElementById('settings-btn');
 const countriesBtn = document.getElementById('countries-btn');
+const reloadBtn = document.getElementById('reload-btn');
+const reloadModal = document.getElementById('reload-modal');
+const reloadCancel = document.getElementById('reload-cancel');
+const reloadConfirm = document.getElementById('reload-confirm');
 const searchInput = document.getElementById('search-input');
 const channelList = document.getElementById('channel-list');
 const loadingMsg = document.getElementById('loading-msg');
 const categoryTabs = document.getElementById('category-tabs');
 const emptyState = document.getElementById('empty-state');
 const epgBar = document.getElementById('epg-bar');
+const nowPlayingInfo = document.getElementById('now-playing-info');
 const channelNameEl = document.getElementById('channel-name');
 const epgNowEl = document.getElementById('epg-now');
 const epgNextEl = document.getElementById('epg-next');
@@ -76,6 +83,24 @@ videoEl.addEventListener('playing', hideSpinner);
 videoEl.addEventListener('waiting', () => playerLoading.classList.remove('hidden'));
 videoEl.addEventListener('error', hideSpinner);
 
+// --- Now-playing overlay: reveal on mouse move, fade after 3s idle ---
+const playerWrapper = document.getElementById('player-wrapper');
+const playerOverlay = document.getElementById('player-overlay');
+let overlayTimer = null;
+
+function revealOverlay() {
+  if (!state.activeChannelId) return; // nothing playing → nothing to show
+  playerOverlay.classList.add('show');
+  clearTimeout(overlayTimer);
+  overlayTimer = setTimeout(() => playerOverlay.classList.remove('show'), 3000);
+}
+
+playerWrapper.addEventListener('mousemove', revealOverlay);
+playerWrapper.addEventListener('mouseleave', () => {
+  clearTimeout(overlayTimer);
+  playerOverlay.classList.remove('show');
+});
+
 // --- Toast ---
 const toast = document.createElement('div');
 toast.id = 'toast';
@@ -103,11 +128,14 @@ async function init() {
   const vis = await api.storeGet('visibleCountries');
   const exp = await api.storeGet('expandedCountries');
   const fl = await api.storeGet('failedLogos');
+  const ttlH = await api.storeGet('cacheTtlHours');
 
   if (favs) state.favorites = new Set(favs);
   state.visibleCountries = Array.isArray(vis) ? new Set(vis) : null;
   if (Array.isArray(exp)) state.expandedCountries = new Set(exp);
   if (Array.isArray(fl)) failedLogos = new Set(fl);
+  cacheTtlSelect.value = String(ttlH == null ? DEFAULT_TTL_HOURS : ttlH);
+  updateLastDownloadNote();
 
   if (m3uUrl) {
     m3uInput.value = m3uUrl;
@@ -123,8 +151,16 @@ function showSettings() {
   // Cancel only makes sense once channels are loaded — on first run there's
   // nothing to go back to.
   cancelBtn.classList.toggle('hidden', state.channels.length === 0);
+  updateLastDownloadNote();
   settingsScreen.classList.remove('hidden');
   mainScreen.classList.add('hidden');
+}
+
+async function updateLastDownloadNote() {
+  const at = await api.storeGet('playlistCachedAt');
+  lastDownloadNote.textContent = at
+    ? `Last full download: ${new Date(at).toLocaleString()}`
+    : 'No playlist downloaded yet.';
 }
 
 function showMain() {
@@ -133,7 +169,18 @@ function showMain() {
 }
 
 // --- Load channels ---
-const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
+const DEFAULT_TTL_HOURS = 24;
+
+// How long a cached playlist stays valid, from the user setting:
+//   -1 = never auto-expire (manual refresh only) · 0 = always re-download · N hours
+async function isCacheValid(cached, cachedAt) {
+  if (!cached || !cachedAt) return false;
+  const ttlH = await api.storeGet('cacheTtlHours');
+  const hours = (ttlH == null) ? DEFAULT_TTL_HOURS : Number(ttlH);
+  if (hours < 0) return true;       // manual only — cache never expires on its own
+  if (hours === 0) return false;    // always re-download on launch
+  return Date.now() - cachedAt < hours * 60 * 60 * 1000;
+}
 
 async function loadChannels(m3uUrl, epgUrl, forceRefresh = false) {
   loadingMsg.classList.remove('hidden');
@@ -143,18 +190,18 @@ async function loadChannels(m3uUrl, epgUrl, forceRefresh = false) {
     let raw;
     const cached = await api.storeGet('playlistCache');
     const cachedAt = await api.storeGet('playlistCachedAt');
-    const cacheValid = cached && cachedAt && (Date.now() - cachedAt < CACHE_TTL_MS);
+    const cacheValid = await isCacheValid(cached, cachedAt);
 
     if (!forceRefresh && cacheValid) {
       raw = cached;
     } else {
-      loadingMsg.textContent = 'Downloading playlist…';
+      loadingMsg.textContent = 'Downloading playlist, hang tight…';
       raw = await api.fetchUrl(m3uUrl);
       await api.storeSet('playlistCache', raw);
       await api.storeSet('playlistCachedAt', Date.now());
     }
 
-    loadingMsg.textContent = 'Parsing channels…';
+    loadingMsg.textContent = 'Parsing channels, get ready…';
     state.channels = parseM3U(raw).filter((c) => c.url && !/^=+/.test(c.name.trim()));
 
     // Precompute country/sub once per channel (#4) so search and tree-building
@@ -178,6 +225,19 @@ async function loadChannels(m3uUrl, epgUrl, forceRefresh = false) {
     state.view = 'browse';
     state.activeGroup = null;
     render();
+
+    // Resume the last-played channel, matched by stable url (not the index id).
+    // Drill into its group so the row is visible and highlighted.
+    const lastUrl = await api.storeGet('lastChannelUrl');
+    if (lastUrl) {
+      const last = state.channels.find((c) => c.url === lastUrl);
+      if (last) {
+        state.view = 'channels';
+        state.activeGroup = last.group;
+        render();
+        playChannel(last);
+      }
+    }
   } catch (err) {
     showMain();
     alert(`Failed to load playlist: ${err.message}`);
@@ -234,8 +294,11 @@ let listObserver = null;       // IntersectionObserver appending the next batch 
 let failedLogos = new Set();   // logo URLs that 404'd — don't re-request on re-render
 const persistFailedLogos = debounce(() => api.storeSet('failedLogos', [...failedLogos]), 1000);
 
+let kbdIndex = -1; // keyboard-focused row in the channel list (-1 = none)
+
 function render() {
   cleanupListObserver();
+  kbdIndex = -1; // DOM is rebuilt below; drop stale keyboard focus
   channelList.innerHTML = '';
   const q = state.searchQuery.trim().toLowerCase();
 
@@ -557,11 +620,15 @@ function playChannel(channel) {
   });
 
   emptyState.style.display = 'none';
+  nowPlayingInfo.classList.remove('hidden');
   channelNameEl.textContent = channel.name;
+  revealOverlay();
 
   showSpinner();
   player.load(channel.url);
   updateEPGOverlay(channel);
+
+  api.storeSet('lastChannelUrl', channel.url); // resume this channel on next load
 }
 
 function updateEPGOverlay(channel) {
@@ -569,26 +636,87 @@ function updateEPGOverlay(channel) {
   const now = getCurrentProgram(state.epgData, key);
   const next = getNextProgram(state.epgData, key);
 
-  epgNowEl.textContent = now ? `Now: ${now.title}` : '';
-  epgNextEl.textContent = next ? `Next: ${next.title}` : '';
+  epgNowEl.textContent = now ? now.title : '';
+  epgNextEl.textContent = next ? `Up next: ${next.title} · ${formatTime(next.start)}` : '';
 
   epgBar.innerHTML = '';
-  if (now || next) {
-    epgBar.classList.remove('hidden');
-    [now, next].filter(Boolean).forEach((p) => {
-      const row = document.createElement('div');
-      row.className = 'epg-program';
-      row.innerHTML = `<span class="epg-time">${formatTime(p.start)}</span><span class="epg-title">${p.title}</span><span class="epg-desc">${p.desc || ''}</span>`;
-      epgBar.appendChild(row);
-    });
-  } else {
+  if (!now && !next) {
     epgBar.classList.add('hidden');
+    return;
   }
+  epgBar.classList.remove('hidden');
+  if (now) epgBar.appendChild(buildEpgNow(now));
+  if (next) epgBar.appendChild(buildEpgNext(next));
+}
+
+// Small DOM helper — text via textContent (never innerHTML) since EPG data is untrusted.
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text != null) node.textContent = text;
+  return node;
+}
+
+function buildEpgNow(p) {
+  const wrap = el('div', 'epg-now');
+
+  const head = el('div', 'epg-now-head');
+  head.append(
+    el('span', 'epg-label', 'Now'),
+    el('span', 'epg-now-title', p.title || 'Unknown programme'),
+    el('span', 'epg-now-time', timeRange(p))
+  );
+  wrap.appendChild(head);
+
+  const pct = progressPct(p);
+  if (pct !== null) {
+    const track = el('div', 'epg-progress');
+    const fill = el('div', 'epg-progress-fill');
+    fill.style.width = `${pct}%`;
+    track.appendChild(fill);
+    wrap.appendChild(track);
+
+    const left = timeRemaining(p);
+    if (left) wrap.appendChild(el('div', 'epg-now-meta', left));
+  }
+  return wrap;
+}
+
+function buildEpgNext(p) {
+  const row = el('div', 'epg-next-row');
+  row.append(
+    el('span', 'epg-label', 'Next'),
+    el('span', 'epg-next-time', formatTime(p.start)),
+    el('span', 'epg-next-title', p.title || 'Unknown programme')
+  );
+  return row;
 }
 
 function formatTime(ms) {
   if (!ms) return '';
   return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function timeRange(p) {
+  if (!p.start && !p.stop) return '';
+  return `${formatTime(p.start)} – ${formatTime(p.stop)}`;
+}
+
+// Percent elapsed through the current programme, or null if it can't be computed.
+function progressPct(p) {
+  if (!p.start || !p.stop || p.stop <= p.start) return null;
+  const pct = ((Date.now() - p.start) / (p.stop - p.start)) * 100;
+  return Math.max(0, Math.min(100, Math.round(pct)));
+}
+
+function timeRemaining(p) {
+  if (!p.stop) return '';
+  const mins = Math.round((p.stop - Date.now()) / 60_000);
+  if (mins <= 0) return '';
+  if (mins < 60) return `${mins} min left`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m ? `${h}h ${m}m left` : `${h}h left`;
 }
 
 // --- Favorites ---
@@ -619,6 +747,7 @@ saveBtn.addEventListener('click', async () => {
   try {
     await api.storeSet('m3uUrl', m3uUrl);
     await api.storeSet('epgUrl', epgUrl || null);
+    await api.storeSet('cacheTtlHours', Number(cacheTtlSelect.value));
 
     showMain();
 
@@ -647,14 +776,84 @@ cancelBtn.addEventListener('click', () => {
 
 settingsBtn.addEventListener('click', showSettings);
 
-// Escape closes whichever overlay is open (countries modal first, then settings
-// if channels are loaded).
+// --- Reload (force re-download playlist), behind a confirmation ---
+function openReloadModal() {
+  reloadModal.classList.remove('hidden');
+}
+function closeReloadModal() {
+  reloadModal.classList.add('hidden');
+}
+
+async function doReload() {
+  closeReloadModal();
+  const m3uUrl = await api.storeGet('m3uUrl');
+  if (!m3uUrl) return;
+  const epgUrl = await api.storeGet('epgUrl');
+  reloadBtn.classList.add('spinning');
+  try {
+    await loadChannels(m3uUrl, epgUrl || null, true);
+  } finally {
+    reloadBtn.classList.remove('spinning');
+  }
+}
+
+reloadBtn.addEventListener('click', openReloadModal);
+reloadCancel.addEventListener('click', closeReloadModal);
+reloadConfirm.addEventListener('click', doReload);
+reloadModal.addEventListener('click', (e) => {
+  if (e.target === reloadModal) closeReloadModal();
+});
+
+// Escape closes whichever overlay is open (reload confirm, then countries modal,
+// then settings if channels are loaded).
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
-  if (!countriesModal.classList.contains('hidden')) {
+  if (!reloadModal.classList.contains('hidden')) {
+    closeReloadModal();
+  } else if (!countriesModal.classList.contains('hidden')) {
     closeCountriesModal();
   } else if (!settingsScreen.classList.contains('hidden') && state.channels.length > 0) {
     showMain();
+  }
+});
+
+// Keyboard navigation of the channel/browse list: Up/Down move a highlight,
+// Enter activates the row (play channel, drill in, expand, or go back).
+function navigableRows() {
+  return [...channelList.querySelectorAll('.channel-item, .country-row, .sub-row, .back-header')];
+}
+
+function moveKbdFocus(delta) {
+  const rows = navigableRows();
+  if (rows.length === 0) return;
+  rows.forEach((r) => r.classList.remove('kbd-focus'));
+  kbdIndex = kbdIndex < 0 ? 0 : Math.max(0, Math.min(rows.length - 1, kbdIndex + delta));
+  const row = rows[kbdIndex];
+  row.classList.add('kbd-focus');
+  row.scrollIntoView({ block: 'nearest' });
+}
+
+document.addEventListener('keydown', (e) => {
+  // Only when the main screen is interactive and no overlay is capturing input.
+  if (!settingsScreen.classList.contains('hidden')) return;
+  if (!reloadModal.classList.contains('hidden') || !countriesModal.classList.contains('hidden')) return;
+  // Don't steal keys from text fields (the single-line search has no use for
+  // up/down, so we allow list nav from there).
+  const ae = document.activeElement;
+  if (ae && ae.tagName === 'INPUT' && ae.id !== 'search-input') return;
+
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    moveKbdFocus(1);
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    moveKbdFocus(-1);
+  } else if (e.key === 'Enter' && kbdIndex >= 0) {
+    const rows = navigableRows();
+    if (rows[kbdIndex]) {
+      e.preventDefault();
+      rows[kbdIndex].click();
+    }
   }
 });
 

@@ -20,6 +20,17 @@
         <label>EPG URL (optional)
           <input type="text" id="epg-url-input" placeholder="http://example.com/xmltv.php?username=..." />
         </label>
+        <label>Re-download playlist
+          <select id="cache-ttl-select">
+            <option value="0">Every launch</option>
+            <option value="6">After 6 hours</option>
+            <option value="12">After 12 hours</option>
+            <option value="24">After 24 hours</option>
+            <option value="168">After 7 days</option>
+            <option value="-1">Only when I refresh manually</option>
+          </select>
+        </label>
+        <p class="settings-note" id="last-download-note"></p>
         <div class="settings-actions">
           <button id="cancel-settings-btn" class="btn-secondary hidden">Cancel</button>
           <button id="save-settings-btn" class="btn-primary">Save & Load Channels</button>
@@ -34,7 +45,8 @@
         <div id="sidebar-header">
           <div class="app-title">UniM3U</div>
           <div class="header-actions">
-            <button id="countries-btn" title="Choose countries">🌐</button>
+            <button id="countries-btn" title="Choose countries">🌐&#xFE0E;</button>
+            <button id="reload-btn" title="Reload playlist">↻</button>
             <button id="settings-btn" title="Settings">⚙</button>
           </div>
         </div>
@@ -60,8 +72,11 @@
           <video id="video-player" controls></video>
           <div id="player-loading" class="hidden"><div class="spinner"></div></div>
           <div id="player-overlay">
-            <div id="now-playing-info">
-              <div id="channel-name"></div>
+            <div id="now-playing-info" class="hidden">
+              <div class="np-meta">
+                <span class="np-live"><span class="np-live-dot"></span>Live</span>
+                <span id="channel-name"></span>
+              </div>
               <div id="epg-now"></div>
               <div id="epg-next"></div>
             </div>
@@ -90,6 +105,20 @@
       </div>
       <div id="countries-checklist"></div>
       <button id="countries-save" class="btn-primary">Save</button>
+    </div>
+  </div>
+
+  <!-- Reload confirmation -->
+  <div id="reload-modal" class="modal-overlay hidden">
+    <div class="modal modal-confirm">
+      <div class="modal-header">
+        <h3>Reload playlist?</h3>
+      </div>
+      <p class="modal-message">This re-downloads the full channel list from your provider and may take a moment.</p>
+      <div class="modal-buttons">
+        <button id="reload-cancel" class="btn-secondary">Cancel</button>
+        <button id="reload-confirm" class="btn-primary">Reload</button>
+      </div>
     </div>
   </div>
 
