@@ -79,7 +79,8 @@ input:focus-visible,
   letter-spacing: 0.05em;
 }
 
-.settings-card input {
+.settings-card input,
+.settings-card select {
   background: var(--bg3);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -90,7 +91,14 @@ input:focus-visible,
   transition: border-color var(--t-fast);
 }
 
-.settings-card input:focus { border-color: var(--accent); }
+.settings-card input:focus,
+.settings-card select:focus { border-color: var(--accent); }
+
+.settings-note {
+  color: var(--text3);
+  font-size: 12px;
+  margin-top: -8px; /* tighten against the select above */
+}
 
 .btn-primary {
   background: var(--accent);

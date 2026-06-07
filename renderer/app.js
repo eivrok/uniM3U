@@ -29,6 +29,8 @@ const settingsScreen = document.getElementById('settings-screen');
 const mainScreen = document.getElementById('main-screen');
 const m3uInput = document.getElementById('m3u-url-input');
 const epgInput = document.getElementById('epg-url-input');
+const cacheTtlSelect = document.getElementById('cache-ttl-select');
+const lastDownloadNote = document.getElementById('last-download-note');
 const saveBtn = document.getElementById('save-settings-btn');
 const cancelBtn = document.getElementById('cancel-settings-btn');
 const settingsBtn = document.getElementById('settings-btn');
@@ -126,11 +128,14 @@ async function init() {
   const vis = await api.storeGet('visibleCountries');
   const exp = await api.storeGet('expandedCountries');
   const fl = await api.storeGet('failedLogos');
+  const ttlH = await api.storeGet('cacheTtlHours');
 
   if (favs) state.favorites = new Set(favs);
   state.visibleCountries = Array.isArray(vis) ? new Set(vis) : null;
   if (Array.isArray(exp)) state.expandedCountries = new Set(exp);
   if (Array.isArray(fl)) failedLogos = new Set(fl);
+  cacheTtlSelect.value = String(ttlH == null ? DEFAULT_TTL_HOURS : ttlH);
+  updateLastDownloadNote();
 
   if (m3uUrl) {
     m3uInput.value = m3uUrl;
@@ -146,8 +151,16 @@ function showSettings() {
   // Cancel only makes sense once channels are loaded — on first run there's
   // nothing to go back to.
   cancelBtn.classList.toggle('hidden', state.channels.length === 0);
+  updateLastDownloadNote();
   settingsScreen.classList.remove('hidden');
   mainScreen.classList.add('hidden');
+}
+
+async function updateLastDownloadNote() {
+  const at = await api.storeGet('playlistCachedAt');
+  lastDownloadNote.textContent = at
+    ? `Last full download: ${new Date(at).toLocaleString()}`
+    : 'No playlist downloaded yet.';
 }
 
 function showMain() {
@@ -156,7 +169,18 @@ function showMain() {
 }
 
 // --- Load channels ---
-const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const DEFAULT_TTL_HOURS = 24;
+
+// How long a cached playlist stays valid, from the user setting:
+//   -1 = never auto-expire (manual refresh only) · 0 = always re-download · N hours
+async function isCacheValid(cached, cachedAt) {
+  if (!cached || !cachedAt) return false;
+  const ttlH = await api.storeGet('cacheTtlHours');
+  const hours = (ttlH == null) ? DEFAULT_TTL_HOURS : Number(ttlH);
+  if (hours < 0) return true;       // manual only — cache never expires on its own
+  if (hours === 0) return false;    // always re-download on launch
+  return Date.now() - cachedAt < hours * 60 * 60 * 1000;
+}
 
 async function loadChannels(m3uUrl, epgUrl, forceRefresh = false) {
   loadingMsg.classList.remove('hidden');
@@ -166,7 +190,7 @@ async function loadChannels(m3uUrl, epgUrl, forceRefresh = false) {
     let raw;
     const cached = await api.storeGet('playlistCache');
     const cachedAt = await api.storeGet('playlistCachedAt');
-    const cacheValid = cached && cachedAt && (Date.now() - cachedAt < CACHE_TTL_MS);
+    const cacheValid = await isCacheValid(cached, cachedAt);
 
     if (!forceRefresh && cacheValid) {
       raw = cached;
@@ -723,6 +747,7 @@ saveBtn.addEventListener('click', async () => {
   try {
     await api.storeSet('m3uUrl', m3uUrl);
     await api.storeSet('epgUrl', epgUrl || null);
+    await api.storeSet('cacheTtlHours', Number(cacheTtlSelect.value));
 
     showMain();
 
