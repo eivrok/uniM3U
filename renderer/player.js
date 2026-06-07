@@ -14,10 +14,19 @@ export class Player {
 
     if (isHLS(url)) {
       this._loadHLS(url);
+    } else if (isNativeMedia(url)) {
+      // Plain VOD files the browser plays natively (mp4/webm/etc) — don't
+      // hand these to mpegts.js, which only demuxes MPEG-TS.
+      this._loadNative(url);
     } else {
       // IPTV direct streams are almost always MPEG-TS
       this._loadMPEGTS(url);
     }
+  }
+
+  _loadNative(url) {
+    this.video.src = url;
+    this.video.play().catch((e) => console.error('Native play failed:', e));
   }
 
   _loadHLS(url) {
@@ -95,10 +104,8 @@ function isHLS(url) {
   return url.includes('.m3u8') || url.includes('type=m3u8');
 }
 
-function isMPEGTS(url) {
-  return (
-    url.includes('.ts') ||
-    url.includes('output=ts') ||
-    url.includes('type=ts')
-  );
+// Containers Chromium plays natively — match on the path, ignoring any query string.
+function isNativeMedia(url) {
+  const path = url.split('?')[0].toLowerCase();
+  return /\.(mp4|m4v|mov|webm|ogv|ogg)$/.test(path);
 }
