@@ -10,8 +10,16 @@
   --text: #eee;
   --text2: #aaa;
   --text3: #666;
+  --border-hover: #555;
+  --favorite: #f0c040;
+  --accent-tint: rgba(229, 9, 20, 0.15);
   --sidebar-w: 300px;
+  --radius-sm: 4px;
   --radius: 6px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
+  --t-fast: 0.15s;
+  --t-slow: 0.3s;
 }
 
 body {
@@ -25,6 +33,16 @@ body {
 }
 
 .hidden { display: none !important; }
+
+/* Keyboard focus — visible ring for tab navigation, suppressed on mouse click */
+button:focus-visible,
+input:focus-visible,
+.channel-item:focus-visible,
+.country-row:focus-visible,
+.sub-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 
 /* ---- Screens ---- */
 .screen { width: 100vw; height: 100vh; }
@@ -40,8 +58,8 @@ body {
 .settings-card {
   background: var(--bg2);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 40px;
+  border-radius: var(--radius-lg);
+  padding: 32px;
   width: 520px;
   display: flex;
   flex-direction: column;
@@ -54,25 +72,33 @@ body {
 .settings-card label {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   color: var(--text2);
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
 
-.settings-card input {
+.settings-card input,
+.settings-card select {
   background: var(--bg3);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   color: var(--text);
   font-size: 13px;
-  padding: 10px 12px;
+  padding: 8px 12px;
   outline: none;
-  transition: border-color 0.15s;
+  transition: border-color var(--t-fast);
 }
 
-.settings-card input:focus { border-color: var(--accent); }
+.settings-card input:focus,
+.settings-card select:focus { border-color: var(--accent); }
+
+.settings-note {
+  color: var(--text3);
+  font-size: 12px;
+  margin-top: -8px; /* tighten against the select above */
+}
 
 .btn-primary {
   background: var(--accent);
@@ -83,12 +109,12 @@ body {
   font-size: 14px;
   font-weight: 600;
   padding: 12px 24px;
-  transition: opacity 0.15s;
+  transition: opacity var(--t-fast);
 }
 .btn-primary:hover { opacity: 0.85; }
 .btn-primary:disabled { opacity: 0.5; cursor: default; }
 
-.settings-actions { display: flex; gap: 10px; }
+.settings-actions { display: flex; gap: 8px; }
 .settings-actions .btn-primary { flex: 1; }
 
 .btn-secondary {
@@ -100,9 +126,9 @@ body {
   font-size: 14px;
   font-weight: 600;
   padding: 12px 24px;
-  transition: all 0.15s;
+  transition: all var(--t-fast);
 }
-.btn-secondary:hover { color: var(--text); border-color: #555; }
+.btn-secondary:hover { color: var(--text); border-color: var(--border-hover); }
 
 /* ---- Main layout ---- */
 #main-screen {
@@ -143,12 +169,12 @@ body {
   cursor: pointer;
   font-size: 18px;
   padding: 2px 4px;
-  transition: color 0.15s;
+  transition: color var(--t-fast);
 }
 #settings-btn:hover { color: var(--text); }
 
 #search-bar {
-  padding: 0 12px 10px;
+  padding: 0 12px 8px;
 }
 
 #search-input {
@@ -158,7 +184,7 @@ body {
   border-radius: var(--radius);
   color: var(--text);
   font-size: 13px;
-  padding: 8px 10px;
+  padding: 8px 12px;
   outline: none;
 }
 #search-input:focus { border-color: var(--accent); }
@@ -167,7 +193,7 @@ body {
 #category-tabs {
   display: flex;
   gap: 4px;
-  padding: 0 12px 10px;
+  padding: 0 12px 8px;
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -176,16 +202,16 @@ body {
 .tab {
   background: var(--bg3);
   border: 1px solid var(--border);
-  border-radius: 20px;
+  border-radius: var(--radius-pill);
   color: var(--text2);
   cursor: pointer;
   font-size: 12px;
   padding: 4px 12px;
   white-space: nowrap;
-  transition: all 0.15s;
+  transition: all var(--t-fast);
   flex-shrink: 0;
 }
-.tab:hover { color: var(--text); border-color: #555; }
+.tab:hover { color: var(--text); border-color: var(--border-hover); }
 .tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 
 /* Channel list */
@@ -204,20 +230,30 @@ body {
 .channel-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
+  gap: 8px;
+  /* 3px transparent bar reserved on every row so the active state colors it
+     in place instead of shoving content 3px right on select. */
+  padding: 8px 12px 8px 9px;
+  border-left: 3px solid transparent;
   cursor: pointer;
   border-bottom: 1px solid rgba(255,255,255,0.03);
-  transition: background 0.1s;
+  transition: background var(--t-fast), border-color var(--t-fast);
   min-height: 52px;
 }
 .channel-item:hover { background: var(--bg3); }
-.channel-item.active { background: rgba(229, 9, 20, 0.15); border-left: 3px solid var(--accent); }
+.channel-item.active { background: var(--accent-tint); border-left-color: var(--accent); }
+
+/* Keyboard-focused row (Up/Down nav) — inset outline, no layout shift */
+.kbd-focus {
+  background: var(--bg3);
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
 
 .channel-logo {
   width: 36px;
   height: 36px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   object-fit: contain;
   background: var(--bg3);
   flex-shrink: 0;
@@ -226,12 +262,12 @@ body {
 .channel-logo-placeholder {
   width: 36px;
   height: 36px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: var(--bg3);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 16px;
+  font-size: 18px;
   flex-shrink: 0;
   color: var(--text3);
 }
@@ -263,10 +299,10 @@ body {
   font-size: 14px;
   padding: 2px;
   flex-shrink: 0;
-  transition: color 0.15s;
+  transition: color var(--t-fast);
 }
-.fav-btn:hover { color: #f0c040; }
-.fav-btn.active { color: #f0c040; }
+.fav-btn:hover { color: var(--favorite); }
+.fav-btn.active { color: var(--favorite); }
 
 #loading-msg {
   padding: 24px;
@@ -297,19 +333,27 @@ body {
   display: block;
 }
 
-#player-overlay {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  padding: 16px 20px;
-  background: linear-gradient(transparent, rgba(0,0,0,0.8));
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.3s;
+/* Live stream — hide the native seek bar + timecode (they jitter as the live
+   buffer grows). Keep play/volume/fullscreen. */
+#video-player::-webkit-media-controls-timeline,
+#video-player::-webkit-media-controls-current-time-display,
+#video-player::-webkit-media-controls-time-remaining-display {
+  display: none;
 }
 
-#player-wrapper:hover #player-overlay { opacity: 1; }
+#player-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: 24px;
+  background: linear-gradient(rgba(0,0,0,0.85), transparent);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--t-slow);
+}
+
+#player-overlay.show { opacity: 1; }
 
 /* Channel-load spinner */
 #player-loading {
@@ -332,38 +376,109 @@ body {
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-#now-playing-info { display: flex; flex-direction: column; gap: 4px; }
+#now-playing-info { display: flex; flex-direction: column; gap: 8px; }
+
+.np-meta { display: flex; align-items: center; gap: 12px; }
+
+.np-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #fff;
+  background: var(--accent);
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  flex-shrink: 0;
+}
+.np-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #fff;
+  animation: live-pulse 2s ease-in-out infinite;
+}
+@keyframes live-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
 
 #channel-name {
   font-size: 18px;
   font-weight: 700;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.5);
 }
 
-#epg-now, #epg-next {
-  font-size: 13px;
-  color: var(--text2);
-}
+#epg-now { font-size: 14px; color: var(--text); }
+#epg-next { font-size: 13px; color: var(--text2); }
 
-/* EPG bar */
+/* EPG bar — now (with elapsed progress) + next */
 #epg-bar {
   background: var(--bg2);
   border-top: 1px solid var(--border);
-  padding: 12px 20px;
+  padding: 16px 20px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  max-height: 120px;
-}
-
-.epg-program {
-  display: flex;
   gap: 12px;
-  font-size: 12px;
 }
 
-.epg-time { color: var(--accent); font-weight: 600; min-width: 50px; }
-.epg-title { color: var(--text); }
-.epg-desc { color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.epg-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.epg-now { display: flex; flex-direction: column; gap: 8px; }
+
+.epg-now-head { display: flex; align-items: baseline; gap: 12px; }
+.epg-now-title {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.epg-now-time {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text2);
+  font-variant-numeric: tabular-nums;
+}
+
+.epg-progress {
+  height: 4px;
+  background: var(--bg3);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+.epg-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: inherit;
+  transition: width var(--t-slow) linear;
+}
+
+.epg-now-meta { font-size: 11px; color: var(--text3); }
+
+.epg-next-row { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
+.epg-next-row .epg-label { color: var(--text3); }
+.epg-next-time {
+  flex-shrink: 0;
+  color: var(--text2);
+  font-variant-numeric: tabular-nums;
+}
+.epg-next-title {
+  flex: 1;
+  color: var(--text2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* Empty state */
 #empty-state {
@@ -383,7 +498,7 @@ body {
 /* Category group headers */
 .category-header {
   padding: 8px 12px 4px;
-  font-size: 10px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--text3);
@@ -396,9 +511,9 @@ body {
 
 .category-nav {
   cursor: pointer;
-  padding: 10px 12px;
+  padding: 8px 12px;
   border-bottom: 1px solid rgba(255,255,255,0.04);
-  transition: color 0.15s, background 0.15s;
+  transition: color var(--t-fast), background var(--t-fast);
   position: static;
 }
 .category-nav:hover { color: var(--text); background: var(--bg3); }
@@ -409,40 +524,48 @@ body {
   bottom: 20px;
   left: 50%;
   transform: translateX(-50%);
-  background: #c0392b;
+  background: var(--accent);
   color: #fff;
   padding: 10px 20px;
-  border-radius: 20px;
+  border-radius: var(--radius-pill);
   font-size: 13px;
   z-index: 9999;
   opacity: 0;
-  transition: opacity 0.3s;
+  transition: opacity var(--t-slow);
   pointer-events: none;
 }
 #toast.show { opacity: 1; }
 
 /* ---- Sidebar header actions ---- */
 .header-actions { display: flex; align-items: center; gap: 4px; }
-#countries-btn {
+#countries-btn,
+#reload-btn {
   background: none;
   border: none;
   color: var(--text3);
   cursor: pointer;
   font-size: 15px;
   padding: 2px 4px;
-  transition: color 0.15s;
+  transition: color var(--t-fast);
 }
-#countries-btn:hover { color: var(--text); }
+#countries-btn:hover,
+#reload-btn:hover { color: var(--text); }
+#reload-btn.spinning { display: inline-block; animation: spin 0.8s linear infinite; }
+
+/* Confirm dialog (reload) */
+.modal-confirm { width: 340px; gap: 16px; }
+.modal-message { color: var(--text2); font-size: 13px; line-height: 1.5; }
+.modal-buttons { display: flex; gap: 8px; justify-content: flex-end; }
 
 /* ---- Country tree (browse) ---- */
 .country-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 11px 12px;
+  padding: 12px;
   cursor: pointer;
   border-bottom: 1px solid rgba(255,255,255,0.04);
-  transition: background 0.12s;
+  transition: background var(--t-fast);
   font-weight: 600;
 }
 .country-row:hover { background: var(--bg3); }
@@ -454,10 +577,10 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px 8px 34px;
+  padding: 8px 12px 8px 32px;
   cursor: pointer;
   border-bottom: 1px solid rgba(255,255,255,0.03);
-  transition: background 0.12s, color 0.12s;
+  transition: background var(--t-fast), color var(--t-fast);
   color: var(--text2);
 }
 .sub-row:hover { background: var(--bg3); color: var(--text); }
@@ -466,10 +589,10 @@ body {
 .count-pill {
   background: var(--bg3);
   color: var(--text3);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   padding: 2px 8px;
-  border-radius: 10px;
+  border-radius: var(--radius-pill);
   flex-shrink: 0;
 }
 .count-pill.small { background: transparent; padding: 2px 4px; }
@@ -478,7 +601,7 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 11px 12px;
+  padding: 12px;
   cursor: pointer;
   background: var(--bg3);
   border-bottom: 1px solid var(--border);
@@ -487,7 +610,7 @@ body {
   z-index: 2;
   font-weight: 600;
   font-size: 13px;
-  transition: color 0.15s;
+  transition: color var(--t-fast);
 }
 .back-header:hover { color: var(--accent2); }
 .back-header .back-arrow { font-size: 15px; }
@@ -512,7 +635,7 @@ body {
 .modal {
   background: var(--bg2);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   width: 380px;
   max-height: 70vh;
   display: flex;
@@ -521,14 +644,14 @@ body {
   gap: 12px;
 }
 .modal-header { display: flex; align-items: center; justify-content: space-between; }
-.modal-header h3 { font-size: 16px; font-weight: 600; }
+.modal-header h3 { font-size: 18px; font-weight: 600; }
 .modal-close {
   background: none;
   border: none;
   color: var(--text3);
   cursor: pointer;
-  font-size: 16px;
-  transition: color 0.15s;
+  font-size: 15px;
+  transition: color var(--t-fast);
 }
 .modal-close:hover { color: var(--text); }
 
@@ -538,7 +661,7 @@ body {
   border-radius: var(--radius);
   color: var(--text);
   font-size: 13px;
-  padding: 8px 10px;
+  padding: 8px 12px;
   outline: none;
 }
 #countries-search:focus { border-color: var(--accent); }
@@ -551,10 +674,10 @@ body {
   color: var(--text2);
   cursor: pointer;
   font-size: 12px;
-  padding: 5px 10px;
-  transition: all 0.15s;
+  padding: 4px 8px;
+  transition: all var(--t-fast);
 }
-.btn-small:hover { color: var(--text); border-color: #555; }
+.btn-small:hover { color: var(--text); border-color: var(--border-hover); }
 
 #countries-checklist {
   flex: 1;
@@ -569,7 +692,7 @@ body {
 .country-check {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   padding: 8px 12px;
   cursor: pointer;
   border-bottom: 1px solid rgba(255,255,255,0.03);
