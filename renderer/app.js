@@ -229,11 +229,13 @@ function getCountryTree() {
 }
 
 // --- Render ---
-const RENDER_LIMIT = 500;
-let failedLogos = new Set(); // logo URLs that 404'd — don't re-request on re-render
+const CHUNK_SIZE = 100;        // channels rendered per incremental batch
+let listObserver = null;       // IntersectionObserver appending the next batch on scroll
+let failedLogos = new Set();   // logo URLs that 404'd — don't re-request on re-render
 const persistFailedLogos = debounce(() => api.storeSet('failedLogos', [...failedLogos]), 1000);
 
 function render() {
+  cleanupListObserver();
   channelList.innerHTML = '';
   const q = state.searchQuery.trim().toLowerCase();
 
@@ -342,21 +344,48 @@ function renderBackHeader(group) {
 
 function renderChannelItems(list, emptyMsg, append = false) {
   if (!append) channelList.innerHTML = '';
+  cleanupListObserver();
 
   if (list.length === 0) {
     renderHint(emptyMsg);
     return;
   }
 
-  const visible = list.slice(0, RENDER_LIMIT);
-  visible.forEach((c) => channelList.appendChild(buildChannelItem(c, state.epgData)));
+  // Render the whole list incrementally: first batch now, the rest appended as a
+  // bottom sentinel scrolls into view. Keeps upfront render cheap without capping.
+  let rendered = 0;
+  const sentinel = document.createElement('div');
+  sentinel.className = 'list-sentinel';
+  sentinel.style.height = '1px';
 
-  if (list.length > RENDER_LIMIT) {
-    const note = document.createElement('div');
-    note.className = 'list-hint';
-    note.textContent = `${list.length - RENDER_LIMIT} more — search to filter`;
-    channelList.appendChild(note);
+  function appendBatch() {
+    const batch = list.slice(rendered, rendered + CHUNK_SIZE);
+    const frag = document.createDocumentFragment();
+    batch.forEach((c) => frag.appendChild(buildChannelItem(c, state.epgData)));
+    channelList.insertBefore(frag, sentinel); // sentinel stays at the bottom
+    rendered += batch.length;
+    if (rendered >= list.length) cleanupListObserver();
   }
+
+  channelList.appendChild(sentinel);
+  appendBatch();
+
+  if (rendered < list.length) {
+    listObserver = new IntersectionObserver(
+      (entries) => { if (entries.some((e) => e.isIntersecting)) appendBatch(); },
+      { root: channelList.parentElement, rootMargin: '300px' }
+    );
+    listObserver.observe(sentinel);
+  }
+}
+
+function cleanupListObserver() {
+  if (listObserver) {
+    listObserver.disconnect();
+    listObserver = null;
+  }
+  const stale = channelList.querySelector('.list-sentinel');
+  if (stale) stale.remove();
 }
 
 function renderHint(msg) {
