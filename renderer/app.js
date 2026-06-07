@@ -1,4 +1,4 @@
-import { parseM3U } from './playlist.js';
+import { parseM3U, parseGroup } from './playlist.js';
 import { loadEPG, getProgramsForChannel, getCurrentProgram, getNextProgram } from './epg.js';
 import { Player } from './player.js';
 
@@ -12,13 +12,15 @@ if (!api) {
 // --- State ---
 const state = {
   channels: [],
-  filteredChannels: [],
-  categories: [],
-  activeCategory: 'all',
   favorites: new Set(),
   activeChannelId: null,
   epgData: {},
   searchQuery: '',
+  activeFilter: 'all',        // 'all' | 'favorites'
+  view: 'browse',             // 'browse' (country tree) | 'channels' (drilled into a group)
+  activeGroup: null,          // group-title string when view === 'channels'
+  expandedCountries: new Set(),
+  visibleCountries: null,     // null = all visible; otherwise a Set of allowed country names
 };
 
 // --- DOM refs ---
@@ -28,6 +30,7 @@ const m3uInput = document.getElementById('m3u-url-input');
 const epgInput = document.getElementById('epg-url-input');
 const saveBtn = document.getElementById('save-settings-btn');
 const settingsBtn = document.getElementById('settings-btn');
+const countriesBtn = document.getElementById('countries-btn');
 const searchInput = document.getElementById('search-input');
 const channelList = document.getElementById('channel-list');
 const loadingMsg = document.getElementById('loading-msg');
@@ -37,6 +40,15 @@ const epgBar = document.getElementById('epg-bar');
 const channelNameEl = document.getElementById('channel-name');
 const epgNowEl = document.getElementById('epg-now');
 const epgNextEl = document.getElementById('epg-next');
+
+// Countries modal refs
+const countriesModal = document.getElementById('countries-modal');
+const countriesClose = document.getElementById('countries-close');
+const countriesSearch = document.getElementById('countries-search');
+const countriesAllBtn = document.getElementById('countries-all');
+const countriesNoneBtn = document.getElementById('countries-none');
+const countriesChecklist = document.getElementById('countries-checklist');
+const countriesSave = document.getElementById('countries-save');
 
 const player = new Player(document.getElementById('video-player'));
 
@@ -56,8 +68,12 @@ async function init() {
   const m3uUrl = await api.storeGet('m3uUrl');
   const epgUrl = await api.storeGet('epgUrl');
   const favs = await api.storeGet('favorites');
+  const vis = await api.storeGet('visibleCountries');
+  const exp = await api.storeGet('expandedCountries');
 
   if (favs) state.favorites = new Set(favs);
+  state.visibleCountries = Array.isArray(vis) ? new Set(vis) : null;
+  if (Array.isArray(exp)) state.expandedCountries = new Set(exp);
 
   if (m3uUrl) {
     m3uInput.value = m3uUrl;
@@ -104,20 +120,17 @@ async function loadChannels(m3uUrl, epgUrl, forceRefresh = false) {
     loadingMsg.textContent = 'Parsing channels…';
     state.channels = parseM3U(raw).filter((c) => c.url && !/^=+/.test(c.name.trim()));
 
-    // Build category list
-    const cats = [...new Set(state.channels.map((c) => c.group).filter(Boolean))].sort();
-    state.categories = cats;
-    renderCategoryTabs(cats);
-
     // Load EPG in background
     if (epgUrl) {
       loadEPG(epgUrl, api.fetchUrl).then((epgData) => {
         state.epgData = epgData;
-        renderChannels();
+        render();
       }).catch(() => {});
     }
 
-    renderChannels();
+    state.view = 'browse';
+    state.activeGroup = null;
+    render();
   } catch (err) {
     showMain();
     alert(`Failed to load playlist: ${err.message}`);
@@ -127,81 +140,176 @@ async function loadChannels(m3uUrl, epgUrl, forceRefresh = false) {
   }
 }
 
-// --- Render categories ---
-function renderCategoryTabs(cats) {
-  // Remove old dynamic tabs
-  categoryTabs.querySelectorAll('.tab[data-cat]:not([data-cat="all"]):not([data-cat="favorites"])').forEach((t) => t.remove());
-
-  cats.forEach((cat) => {
-    const btn = document.createElement('button');
-    btn.className = 'tab';
-    btn.dataset.cat = cat;
-    btn.textContent = cat;
-    categoryTabs.appendChild(btn);
-  });
+// --- Country tree ---
+function isCountryVisible(country) {
+  return state.visibleCountries === null || state.visibleCountries.has(country);
 }
 
-// --- Render channel list ---
-function renderChannels() {
-  const { activeCategory, searchQuery, channels, favorites, epgData } = state;
-  const q = searchQuery.toLowerCase();
-
-  let list = channels;
-
-  if (activeCategory === 'favorites') {
-    list = list.filter((c) => favorites.has(c.id));
-  } else if (activeCategory !== 'all') {
-    list = list.filter((c) => c.group === activeCategory);
+/**
+ * Groups channels into countries -> subcategories. Returns a sorted array:
+ * [{ country, count, leaf, subs: [{ sub, group, count }] }]
+ * A "leaf" country has a single group with no subcategory — clicking it
+ * drills straight into channels instead of expanding.
+ */
+function buildCountryTree(channels) {
+  const map = new Map();
+  for (const c of channels) {
+    const { country, sub } = parseGroup(c.group);
+    if (!map.has(country)) map.set(country, { country, count: 0, subs: new Map() });
+    const node = map.get(country);
+    node.count++;
+    const group = c.group || 'Uncategorized';
+    if (!node.subs.has(group)) node.subs.set(group, { sub, group, count: 0 });
+    node.subs.get(group).count++;
   }
 
-  if (q) {
-    list = list.filter((c) => c.name.toLowerCase().includes(q));
-  }
+  return [...map.values()]
+    .sort((a, b) => a.country.localeCompare(b.country))
+    .map((n) => {
+      const subs = [...n.subs.values()].sort((a, b) => (a.sub || '').localeCompare(b.sub || ''));
+      return {
+        country: n.country,
+        count: n.count,
+        subs,
+        leaf: subs.length === 1 && subs[0].sub === null,
+      };
+    });
+}
 
-  state.filteredChannels = list;
+// --- Render ---
+const RENDER_LIMIT = 500;
+
+function render() {
   channelList.innerHTML = '';
+  const q = state.searchQuery.trim().toLowerCase();
 
-  if (activeCategory === 'all' && !q) {
-    // Show category overview — each group header is clickable to drill in
-    const groups = {};
-    list.forEach((c) => {
-      const g = c.group || 'Uncategorized';
-      if (!groups[g]) groups[g] = 0;
-      groups[g]++;
-    });
-    Object.entries(groups).forEach(([groupName, count]) => {
-      const header = document.createElement('div');
-      header.className = 'category-header category-nav';
-      header.textContent = `${groupName}  (${count})`;
-      header.title = 'Click to browse this category';
-      header.addEventListener('click', () => {
-        // Activate this category tab
-        categoryTabs.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
-        let tab = categoryTabs.querySelector(`[data-cat="${CSS.escape(groupName)}"]`);
-        if (tab) tab.classList.add('active');
-        state.activeCategory = groupName;
-        renderChannels();
-      });
-      channelList.appendChild(header);
-    });
-    const hint = document.createElement('div');
-    hint.style.cssText = 'padding:12px;color:var(--text3);font-size:12px;text-align:center';
-    hint.textContent = 'Click a category above, or search to find channels';
-    channelList.appendChild(hint);
+  // Search cuts across all visible channels, ignoring drill/collapse state.
+  if (q) {
+    const results = state.channels.filter(
+      (c) => isCountryVisible(parseGroup(c.group).country) && c.name.toLowerCase().includes(q)
+    );
+    renderChannelItems(results, 'No channels match your search');
     return;
   }
 
-  // Render up to 500 channels for a single category or search result
-  const RENDER_LIMIT = 500;
+  // Favorites: flat list, shown regardless of country whitelist.
+  if (state.activeFilter === 'favorites') {
+    const favs = state.channels.filter((c) => state.favorites.has(c.id));
+    renderChannelItems(favs, 'No favorites yet — tap ★ on a channel');
+    return;
+  }
+
+  // Drilled into a subcategory.
+  if (state.view === 'channels' && state.activeGroup) {
+    renderBackHeader(state.activeGroup);
+    const list = state.channels.filter((c) => (c.group || 'Uncategorized') === state.activeGroup);
+    renderChannelItems(list, 'No channels here', true);
+    return;
+  }
+
+  // Default: country tree.
+  renderBrowse();
+}
+
+function renderBrowse() {
+  const tree = buildCountryTree(state.channels).filter((n) => isCountryVisible(n.country));
+
+  if (tree.length === 0) {
+    renderHint('No countries selected — pick some with 🌐');
+    return;
+  }
+
+  for (const node of tree) {
+    const header = document.createElement('div');
+    header.className = 'country-row';
+
+    const expanded = state.expandedCountries.has(node.country);
+
+    if (node.leaf) {
+      header.classList.add('leaf');
+      appendNameAndPill(header, node.country, node.count);
+      header.addEventListener('click', () => drillInto(node.subs[0].group));
+    } else {
+      const caret = document.createElement('span');
+      caret.className = 'caret';
+      caret.textContent = expanded ? '▾' : '▸';
+      header.appendChild(caret);
+      appendNameAndPill(header, node.country, node.count);
+      header.addEventListener('click', () => toggleCountry(node.country));
+    }
+
+    channelList.appendChild(header);
+
+    if (expanded && !node.leaf) {
+      for (const s of node.subs) {
+        const row = document.createElement('div');
+        row.className = 'sub-row';
+        const name = document.createElement('span');
+        name.className = 'sub-name';
+        name.textContent = s.sub ?? node.country;
+        const pill = document.createElement('span');
+        pill.className = 'count-pill small';
+        pill.textContent = s.count;
+        row.append(name, pill);
+        row.addEventListener('click', () => drillInto(s.group));
+        channelList.appendChild(row);
+      }
+    }
+  }
+}
+
+function appendNameAndPill(row, name, count) {
+  const nameEl = document.createElement('span');
+  nameEl.className = 'country-name';
+  nameEl.textContent = name;
+  const pill = document.createElement('span');
+  pill.className = 'count-pill';
+  pill.textContent = count;
+  row.append(nameEl, pill);
+}
+
+function renderBackHeader(group) {
+  const { country, sub } = parseGroup(group);
+  const header = document.createElement('div');
+  header.className = 'back-header';
+
+  const arrow = document.createElement('span');
+  arrow.className = 'back-arrow';
+  arrow.textContent = '←';
+
+  const crumb = document.createElement('span');
+  crumb.className = 'back-crumb';
+  crumb.textContent = sub ? `${country} · ${sub}` : country;
+
+  header.append(arrow, crumb);
+  header.addEventListener('click', goBack);
+  channelList.appendChild(header);
+}
+
+function renderChannelItems(list, emptyMsg, append = false) {
+  if (!append) channelList.innerHTML = '';
+
+  if (list.length === 0) {
+    renderHint(emptyMsg);
+    return;
+  }
+
   const visible = list.slice(0, RENDER_LIMIT);
-  visible.forEach((c) => channelList.appendChild(buildChannelItem(c, epgData)));
+  visible.forEach((c) => channelList.appendChild(buildChannelItem(c, state.epgData)));
 
   if (list.length > RENDER_LIMIT) {
     const note = document.createElement('div');
-    note.className = 'category-header';
+    note.className = 'list-hint';
     note.textContent = `${list.length - RENDER_LIMIT} more — search to filter`;
     channelList.appendChild(note);
   }
+}
+
+function renderHint(msg) {
+  const hint = document.createElement('div');
+  hint.className = 'list-hint';
+  hint.textContent = msg;
+  channelList.appendChild(hint);
 }
 
 function buildChannelItem(channel, epgData) {
@@ -265,6 +373,85 @@ function logoPlaceholder() {
   return div;
 }
 
+// --- Navigation actions ---
+function toggleCountry(country) {
+  if (state.expandedCountries.has(country)) {
+    state.expandedCountries.delete(country);
+  } else {
+    state.expandedCountries.add(country);
+  }
+  api.storeSet('expandedCountries', [...state.expandedCountries]);
+  render();
+}
+
+function drillInto(group) {
+  state.view = 'channels';
+  state.activeGroup = group;
+  render();
+  channelList.parentElement.scrollTop = 0;
+}
+
+function goBack() {
+  state.view = 'browse';
+  state.activeGroup = null;
+  render();
+}
+
+// --- Countries whitelist modal ---
+function openCountriesModal() {
+  const tree = buildCountryTree(state.channels);
+  countriesChecklist.innerHTML = '';
+
+  for (const node of tree) {
+    const row = document.createElement('label');
+    row.className = 'country-check';
+    row.dataset.country = node.country.toLowerCase();
+
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.value = node.country;
+    cb.checked = isCountryVisible(node.country);
+
+    const name = document.createElement('span');
+    name.textContent = node.country;
+
+    const count = document.createElement('span');
+    count.className = 'cc-count';
+    count.textContent = node.count;
+
+    row.append(cb, name, count);
+    countriesChecklist.appendChild(row);
+  }
+
+  countriesSearch.value = '';
+  countriesModal.classList.remove('hidden');
+}
+
+function closeCountriesModal() {
+  countriesModal.classList.add('hidden');
+}
+
+function saveCountries() {
+  const boxes = [...countriesChecklist.querySelectorAll('input[type=checkbox]')];
+  const checked = boxes.filter((b) => b.checked).map((b) => b.value);
+
+  // All checked => null (everything visible) keeps future-added countries visible too.
+  state.visibleCountries = checked.length === boxes.length ? null : new Set(checked);
+  api.storeSet('visibleCountries', state.visibleCountries ? [...state.visibleCountries] : null);
+
+  closeCountriesModal();
+  state.view = 'browse';
+  state.activeGroup = null;
+  render();
+}
+
+function filterCountriesList(q) {
+  const needle = q.trim().toLowerCase();
+  countriesChecklist.querySelectorAll('.country-check').forEach((row) => {
+    row.classList.toggle('hidden', needle !== '' && !row.dataset.country.includes(needle));
+  });
+}
+
 // --- Play channel ---
 function playChannel(channel) {
   state.activeChannelId = channel.id;
@@ -316,7 +503,7 @@ function toggleFavorite(channelId) {
     state.favorites.add(channelId);
   }
   api.storeSet('favorites', [...state.favorites]);
-  if (state.activeCategory === 'favorites') renderChannels();
+  if (state.activeFilter === 'favorites') render();
 }
 
 // --- Event listeners ---
@@ -346,7 +533,7 @@ settingsBtn.addEventListener('click', showSettings);
 
 searchInput.addEventListener('input', (e) => {
   state.searchQuery = e.target.value;
-  renderChannels();
+  render();
 });
 
 categoryTabs.addEventListener('click', (e) => {
@@ -354,8 +541,25 @@ categoryTabs.addEventListener('click', (e) => {
   if (!tab) return;
   categoryTabs.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
   tab.classList.add('active');
-  state.activeCategory = tab.dataset.cat;
-  renderChannels();
+  state.activeFilter = tab.dataset.cat; // 'all' | 'favorites'
+  state.view = 'browse';
+  state.activeGroup = null;
+  render();
+});
+
+// Countries modal wiring
+countriesBtn.addEventListener('click', openCountriesModal);
+countriesClose.addEventListener('click', closeCountriesModal);
+countriesSave.addEventListener('click', saveCountries);
+countriesModal.addEventListener('click', (e) => {
+  if (e.target === countriesModal) closeCountriesModal();
+});
+countriesSearch.addEventListener('input', (e) => filterCountriesList(e.target.value));
+countriesAllBtn.addEventListener('click', () => {
+  countriesChecklist.querySelectorAll('input[type=checkbox]').forEach((b) => { b.checked = true; });
+});
+countriesNoneBtn.addEventListener('click', () => {
+  countriesChecklist.querySelectorAll('input[type=checkbox]').forEach((b) => { b.checked = false; });
 });
 
 // Refresh EPG every minute
