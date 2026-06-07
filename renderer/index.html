@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src *; media-src * blob:; img-src * data: blob:; script-src 'self' blob:; worker-src blob:" />
+  <title>IPTV Player</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Settings screen -->
+    <div id="settings-screen" class="screen hidden">
+      <div class="settings-card">
+        <h2>IPTV Player Setup</h2>
+        <p class="subtitle">Enter your M3U playlist URL</p>
+        <label>M3U Playlist URL
+          <input type="text" id="m3u-url-input" placeholder="http://example.com/get.php?username=...&type=m3u_plus" />
+        </label>
+        <label>EPG URL (optional)
+          <input type="text" id="epg-url-input" placeholder="http://example.com/xmltv.php?username=..." />
+        </label>
+        <button id="save-settings-btn" class="btn-primary">Save & Load Channels</button>
+      </div>
+    </div>
+
+    <!-- Main player screen -->
+    <div id="main-screen" class="screen hidden">
+      <!-- Sidebar -->
+      <aside id="sidebar">
+        <div id="sidebar-header">
+          <div class="app-title">IPTV Player</div>
+          <button id="settings-btn" title="Settings">⚙</button>
+        </div>
+
+        <div id="search-bar">
+          <input type="search" id="search-input" placeholder="Search channels..." />
+        </div>
+
+        <div id="category-tabs">
+          <button class="tab active" data-cat="all">All</button>
+          <button class="tab" data-cat="favorites">★ Favorites</button>
+        </div>
+
+        <div id="channel-list-container">
+          <div id="channel-list"></div>
+          <div id="loading-msg" class="hidden">Loading channels…</div>
+        </div>
+      </aside>
+
+      <!-- Player area -->
+      <main id="player-area">
+        <div id="player-wrapper">
+          <video id="video-player" controls></video>
+          <div id="player-overlay">
+            <div id="now-playing-info">
+              <div id="channel-name"></div>
+              <div id="epg-now"></div>
+              <div id="epg-next"></div>
+            </div>
+          </div>
+        </div>
+        <div id="epg-bar" class="hidden"></div>
+        <div id="empty-state">
+          <div class="empty-icon">📺</div>
+          <p>Select a channel to start watching</p>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script src="lib/hls.min.js"></script>
+  <script src="lib/mpegts.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

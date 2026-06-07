@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+
+# Playlists/EPG — contain stream URLs with embedded credentials
+*.m3u
+*.m3u8
+*.xmltv

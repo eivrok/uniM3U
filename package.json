@@ -1,0 +1,27 @@
+{
+  "name": "iptv-player",
+  "version": "1.0.0",
+  "description": "macOS IPTV Player",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --mac"
+  },
+  "devDependencies": {
+    "electron": "^42.3.3",
+    "electron-builder": "^26.15.0"
+  },
+  "dependencies": {
+    "electron-store": "^8.2.0",
+    "hls.js": "^1.6.16",
+    "mpegts.js": "^1.8.0"
+  },
+  "build": {
+    "appId": "com.eivind.iptv-player",
+    "productName": "IPTV Player",
+    "mac": {
+      "category": "public.app-category.entertainment",
+      "target": "dmg"
+    }
+  }
+}
