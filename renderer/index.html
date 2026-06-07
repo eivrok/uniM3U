@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src *; media-src * blob:; img-src * data: blob:; script-src 'self' blob:; worker-src blob:" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src *; media-src * blob:; img-src * data: blob:; script-src 'self' blob:; worker-src 'self' blob:" />
   <title>UniM3U</title>
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -20,7 +20,10 @@
         <label>EPG URL (optional)
           <input type="text" id="epg-url-input" placeholder="http://example.com/xmltv.php?username=..." />
         </label>
-        <button id="save-settings-btn" class="btn-primary">Save & Load Channels</button>
+        <div class="settings-actions">
+          <button id="cancel-settings-btn" class="btn-secondary hidden">Cancel</button>
+          <button id="save-settings-btn" class="btn-primary">Save & Load Channels</button>
+        </div>
       </div>
     </div>
 
@@ -55,6 +58,7 @@
       <main id="player-area">
         <div id="player-wrapper">
           <video id="video-player" controls></video>
+          <div id="player-loading" class="hidden"><div class="spinner"></div></div>
           <div id="player-overlay">
             <div id="now-playing-info">
               <div id="channel-name"></div>

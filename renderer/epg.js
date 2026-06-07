@@ -1,48 +1,27 @@
 /**
- * Loads and parses XMLTV EPG data.
- * Returns a map: tvgId -> array of { title, desc, start, stop }
+ * Loads XMLTV EPG data and parses it in a Web Worker (off the main thread).
+ * Returns a map: channelId -> array of { title, desc, start, stop }
+ * where start/stop are epoch milliseconds (numbers) or null.
  */
 export async function loadEPG(epgUrl, fetchUrl) {
   const raw = await fetchUrl(epgUrl);
-  return parseXMLTV(raw);
+  return parseInWorker(raw);
 }
 
-function parseXMLTV(xmlString) {
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(xmlString, 'application/xml');
-  const result = {};
-
-  const programmes = doc.querySelectorAll('programme');
-  programmes.forEach((prog) => {
-    const channel = prog.getAttribute('channel');
-    if (!channel) return;
-
-    const title = prog.querySelector('title')?.textContent || '';
-    const desc = prog.querySelector('desc')?.textContent || '';
-    const start = parseXMLTVDate(prog.getAttribute('start'));
-    const stop = parseXMLTVDate(prog.getAttribute('stop'));
-
-    if (!result[channel]) result[channel] = [];
-    result[channel].push({ title, desc, start, stop });
+function parseInWorker(xml) {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('./epg-worker.js', import.meta.url), { type: 'module' });
+    worker.onmessage = (e) => {
+      worker.terminate();
+      if (e.data.ok) resolve(e.data.data);
+      else reject(new Error(e.data.error));
+    };
+    worker.onerror = (err) => {
+      worker.terminate();
+      reject(err);
+    };
+    worker.postMessage(xml);
   });
-
-  // Sort each channel's programmes by start time
-  Object.values(result).forEach((progs) => progs.sort((a, b) => a.start - b.start));
-
-  return result;
-}
-
-// XMLTV date format: 20240101120000 +0000
-function parseXMLTVDate(str) {
-  if (!str) return null;
-  const clean = str.trim();
-  // 14-digit + optional timezone
-  const m = clean.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\s*([+-]\d{4})?/);
-  if (!m) return null;
-  const [, yr, mo, dy, hr, mn, sc, tz] = m;
-  const tzOffset = tz ? (parseInt(tz.slice(1, 3)) * 60 + parseInt(tz.slice(3, 5))) * (tz[0] === '-' ? -1 : 1) : 0;
-  const utcMs = Date.UTC(+yr, +mo - 1, +dy, +hr, +mn, +sc) - tzOffset * 60_000;
-  return new Date(utcMs);
 }
 
 export function getCurrentProgram(epgData, channelId) {
