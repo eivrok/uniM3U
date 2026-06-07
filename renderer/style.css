@@ -156,11 +156,18 @@ input:focus-visible,
   padding: 8px 16px 12px;
 }
 
+#brand { display: flex; align-items: center; min-width: 0; }
+
 .app-title {
   font-size: 15px;
   font-weight: 700;
   color: var(--text);
 }
+
+/* Logo shown only once it successfully loads (toggled from app.js) */
+#app-logo { height: 32px; width: auto; display: none; min-width: 0; }
+#brand { flex-shrink: 1; overflow: hidden; }
+.header-actions { flex-shrink: 0; }
 
 #settings-btn {
   background: none;

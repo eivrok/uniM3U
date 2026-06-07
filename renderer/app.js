@@ -59,6 +59,16 @@ const countriesNoneBtn = document.getElementById('countries-none');
 const countriesChecklist = document.getElementById('countries-checklist');
 const countriesSave = document.getElementById('countries-save');
 
+// Brand logo — use assets/logo.png if it loads, otherwise fall back to the text.
+const appLogo = document.getElementById('app-logo');
+const brandText = document.getElementById('brand-text');
+appLogo.addEventListener('load', () => {
+  appLogo.style.display = 'block';
+  brandText.style.display = 'none';
+});
+appLogo.addEventListener('error', () => { appLogo.style.display = 'none'; });
+appLogo.src = 'assets/logo.png';
+
 const videoEl = document.getElementById('video-player');
 const player = new Player(videoEl);
 
