@@ -156,7 +156,7 @@ function showMain() {
 }
 
 // --- Load channels ---
-const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 async function loadChannels(m3uUrl, epgUrl, forceRefresh = false) {
   loadingMsg.classList.remove('hidden');
