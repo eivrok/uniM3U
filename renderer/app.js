@@ -43,6 +43,7 @@ const loadingMsg = document.getElementById('loading-msg');
 const categoryTabs = document.getElementById('category-tabs');
 const emptyState = document.getElementById('empty-state');
 const epgBar = document.getElementById('epg-bar');
+const nowPlayingInfo = document.getElementById('now-playing-info');
 const channelNameEl = document.getElementById('channel-name');
 const epgNowEl = document.getElementById('epg-now');
 const epgNextEl = document.getElementById('epg-next');
@@ -79,6 +80,24 @@ function hideSpinner() {
 videoEl.addEventListener('playing', hideSpinner);
 videoEl.addEventListener('waiting', () => playerLoading.classList.remove('hidden'));
 videoEl.addEventListener('error', hideSpinner);
+
+// --- Now-playing overlay: reveal on mouse move, fade after 3s idle ---
+const playerWrapper = document.getElementById('player-wrapper');
+const playerOverlay = document.getElementById('player-overlay');
+let overlayTimer = null;
+
+function revealOverlay() {
+  if (!state.activeChannelId) return; // nothing playing → nothing to show
+  playerOverlay.classList.add('show');
+  clearTimeout(overlayTimer);
+  overlayTimer = setTimeout(() => playerOverlay.classList.remove('show'), 3000);
+}
+
+playerWrapper.addEventListener('mousemove', revealOverlay);
+playerWrapper.addEventListener('mouseleave', () => {
+  clearTimeout(overlayTimer);
+  playerOverlay.classList.remove('show');
+});
 
 // --- Toast ---
 const toast = document.createElement('div');
@@ -152,13 +171,13 @@ async function loadChannels(m3uUrl, epgUrl, forceRefresh = false) {
     if (!forceRefresh && cacheValid) {
       raw = cached;
     } else {
-      loadingMsg.textContent = 'Downloading playlist…';
+      loadingMsg.textContent = 'Downloading playlist, hang tight…';
       raw = await api.fetchUrl(m3uUrl);
       await api.storeSet('playlistCache', raw);
       await api.storeSet('playlistCachedAt', Date.now());
     }
 
-    loadingMsg.textContent = 'Parsing channels…';
+    loadingMsg.textContent = 'Parsing channels, get ready…';
     state.channels = parseM3U(raw).filter((c) => c.url && !/^=+/.test(c.name.trim()));
 
     // Precompute country/sub once per channel (#4) so search and tree-building
@@ -182,6 +201,19 @@ async function loadChannels(m3uUrl, epgUrl, forceRefresh = false) {
     state.view = 'browse';
     state.activeGroup = null;
     render();
+
+    // Resume the last-played channel, matched by stable url (not the index id).
+    // Drill into its group so the row is visible and highlighted.
+    const lastUrl = await api.storeGet('lastChannelUrl');
+    if (lastUrl) {
+      const last = state.channels.find((c) => c.url === lastUrl);
+      if (last) {
+        state.view = 'channels';
+        state.activeGroup = last.group;
+        render();
+        playChannel(last);
+      }
+    }
   } catch (err) {
     showMain();
     alert(`Failed to load playlist: ${err.message}`);
@@ -238,8 +270,11 @@ let listObserver = null;       // IntersectionObserver appending the next batch 
 let failedLogos = new Set();   // logo URLs that 404'd — don't re-request on re-render
 const persistFailedLogos = debounce(() => api.storeSet('failedLogos', [...failedLogos]), 1000);
 
+let kbdIndex = -1; // keyboard-focused row in the channel list (-1 = none)
+
 function render() {
   cleanupListObserver();
+  kbdIndex = -1; // DOM is rebuilt below; drop stale keyboard focus
   channelList.innerHTML = '';
   const q = state.searchQuery.trim().toLowerCase();
 
@@ -561,11 +596,15 @@ function playChannel(channel) {
   });
 
   emptyState.style.display = 'none';
+  nowPlayingInfo.classList.remove('hidden');
   channelNameEl.textContent = channel.name;
+  revealOverlay();
 
   showSpinner();
   player.load(channel.url);
   updateEPGOverlay(channel);
+
+  api.storeSet('lastChannelUrl', channel.url); // resume this channel on next load
 }
 
 function updateEPGOverlay(channel) {
@@ -573,26 +612,87 @@ function updateEPGOverlay(channel) {
   const now = getCurrentProgram(state.epgData, key);
   const next = getNextProgram(state.epgData, key);
 
-  epgNowEl.textContent = now ? `Now: ${now.title}` : '';
-  epgNextEl.textContent = next ? `Next: ${next.title}` : '';
+  epgNowEl.textContent = now ? now.title : '';
+  epgNextEl.textContent = next ? `Up next: ${next.title} · ${formatTime(next.start)}` : '';
 
   epgBar.innerHTML = '';
-  if (now || next) {
-    epgBar.classList.remove('hidden');
-    [now, next].filter(Boolean).forEach((p) => {
-      const row = document.createElement('div');
-      row.className = 'epg-program';
-      row.innerHTML = `<span class="epg-time">${formatTime(p.start)}</span><span class="epg-title">${p.title}</span><span class="epg-desc">${p.desc || ''}</span>`;
-      epgBar.appendChild(row);
-    });
-  } else {
+  if (!now && !next) {
     epgBar.classList.add('hidden');
+    return;
   }
+  epgBar.classList.remove('hidden');
+  if (now) epgBar.appendChild(buildEpgNow(now));
+  if (next) epgBar.appendChild(buildEpgNext(next));
+}
+
+// Small DOM helper — text via textContent (never innerHTML) since EPG data is untrusted.
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text != null) node.textContent = text;
+  return node;
+}
+
+function buildEpgNow(p) {
+  const wrap = el('div', 'epg-now');
+
+  const head = el('div', 'epg-now-head');
+  head.append(
+    el('span', 'epg-label', 'Now'),
+    el('span', 'epg-now-title', p.title || 'Unknown programme'),
+    el('span', 'epg-now-time', timeRange(p))
+  );
+  wrap.appendChild(head);
+
+  const pct = progressPct(p);
+  if (pct !== null) {
+    const track = el('div', 'epg-progress');
+    const fill = el('div', 'epg-progress-fill');
+    fill.style.width = `${pct}%`;
+    track.appendChild(fill);
+    wrap.appendChild(track);
+
+    const left = timeRemaining(p);
+    if (left) wrap.appendChild(el('div', 'epg-now-meta', left));
+  }
+  return wrap;
+}
+
+function buildEpgNext(p) {
+  const row = el('div', 'epg-next-row');
+  row.append(
+    el('span', 'epg-label', 'Next'),
+    el('span', 'epg-next-time', formatTime(p.start)),
+    el('span', 'epg-next-title', p.title || 'Unknown programme')
+  );
+  return row;
 }
 
 function formatTime(ms) {
   if (!ms) return '';
   return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function timeRange(p) {
+  if (!p.start && !p.stop) return '';
+  return `${formatTime(p.start)} – ${formatTime(p.stop)}`;
+}
+
+// Percent elapsed through the current programme, or null if it can't be computed.
+function progressPct(p) {
+  if (!p.start || !p.stop || p.stop <= p.start) return null;
+  const pct = ((Date.now() - p.start) / (p.stop - p.start)) * 100;
+  return Math.max(0, Math.min(100, Math.round(pct)));
+}
+
+function timeRemaining(p) {
+  if (!p.stop) return '';
+  const mins = Math.round((p.stop - Date.now()) / 60_000);
+  if (mins <= 0) return '';
+  if (mins < 60) return `${mins} min left`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m ? `${h}h ${m}m left` : `${h}h left`;
 }
 
 // --- Favorites ---
@@ -689,6 +789,46 @@ document.addEventListener('keydown', (e) => {
     closeCountriesModal();
   } else if (!settingsScreen.classList.contains('hidden') && state.channels.length > 0) {
     showMain();
+  }
+});
+
+// Keyboard navigation of the channel/browse list: Up/Down move a highlight,
+// Enter activates the row (play channel, drill in, expand, or go back).
+function navigableRows() {
+  return [...channelList.querySelectorAll('.channel-item, .country-row, .sub-row, .back-header')];
+}
+
+function moveKbdFocus(delta) {
+  const rows = navigableRows();
+  if (rows.length === 0) return;
+  rows.forEach((r) => r.classList.remove('kbd-focus'));
+  kbdIndex = kbdIndex < 0 ? 0 : Math.max(0, Math.min(rows.length - 1, kbdIndex + delta));
+  const row = rows[kbdIndex];
+  row.classList.add('kbd-focus');
+  row.scrollIntoView({ block: 'nearest' });
+}
+
+document.addEventListener('keydown', (e) => {
+  // Only when the main screen is interactive and no overlay is capturing input.
+  if (!settingsScreen.classList.contains('hidden')) return;
+  if (!reloadModal.classList.contains('hidden') || !countriesModal.classList.contains('hidden')) return;
+  // Don't steal keys from text fields (the single-line search has no use for
+  // up/down, so we allow list nav from there).
+  const ae = document.activeElement;
+  if (ae && ae.tagName === 'INPUT' && ae.id !== 'search-input') return;
+
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    moveKbdFocus(1);
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    moveKbdFocus(-1);
+  } else if (e.key === 'Enter' && kbdIndex >= 0) {
+    const rows = navigableRows();
+    if (rows[kbdIndex]) {
+      e.preventDefault();
+      rows[kbdIndex].click();
+    }
   }
 });
 

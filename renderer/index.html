@@ -61,8 +61,11 @@
           <video id="video-player" controls></video>
           <div id="player-loading" class="hidden"><div class="spinner"></div></div>
           <div id="player-overlay">
-            <div id="now-playing-info">
-              <div id="channel-name"></div>
+            <div id="now-playing-info" class="hidden">
+              <div class="np-meta">
+                <span class="np-live"><span class="np-live-dot"></span>Live</span>
+                <span id="channel-name"></span>
+              </div>
               <div id="epg-now"></div>
               <div id="epg-next"></div>
             </div>
