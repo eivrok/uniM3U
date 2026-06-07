@@ -17,6 +17,7 @@ function createWindow() {
     minWidth: 900,
     minHeight: 600,
     titleBarStyle: 'hiddenInset',
+    autoHideMenuBar: true, // hide the Win/Linux menu bar (Alt reveals); macOS uses the system menu
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
