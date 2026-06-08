@@ -1,14 +1,12 @@
 name: Release
 
-# Push a tag like v1.0.0 to build installers for all three platforms and
-# upload them to a GitHub Release (created as a draft — publish it manually).
 on:
   push:
     tags:
       - 'v*'
 
 permissions:
-  contents: write # needed to create/upload the GitHub Release
+  contents: write
 
 jobs:
   release:
@@ -29,9 +27,14 @@ jobs:
 
       - run: npm test
 
-      # electron-builder builds the host OS target (mac=dmg, win=nsis,
-      # linux=AppImage) and uploads to the release for this tag.
-      - name: Build and publish
-        run: npm run build -- --publish always
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build
+        run: npm run build
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: |
+            dist/*.dmg
+            dist/*.exe
+            dist/*.AppImage
