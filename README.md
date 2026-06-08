@@ -3,6 +3,9 @@
 A fast desktop IPTV player. Point it at your M3U playlist (and optional XMLTV EPG)
 and watch. Built with Electron; plays HLS and MPEG-TS streams.
 
+UniM3U ships no channels or playlists — you bring your own. You are responsible
+for the legality of the streams you load.
+
 ## Install
 
 Download the installer for your platform from the [Releases](../../releases) page.
@@ -20,7 +23,7 @@ Download the installer for your platform from the [Releases](../../releases) pag
 (You only see this once. It appears because the app isn't signed with a paid
 code-signing certificate.)
 
-### macOS (`UniM3U-x.y.z.dmg`)
+### macOS (`UniM3U-x.y.z-arm64.dmg`)
 
 > The macOS build is **Apple Silicon (arm64) only** — it runs on M1/M2/M3+ Macs,
 > not Intel Macs.
@@ -67,3 +70,7 @@ npm start            # run in dev
 npm test             # run tests
 npm run build:win    # or build:mac / build:linux — builds on that OS only
 ```
+
+## License
+
+MIT — see [LICENSE](LICENSE).

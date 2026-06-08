@@ -2,6 +2,7 @@
   "name": "unim3u",
   "version": "1.0.0",
   "description": "UniM3U — a fast M3U IPTV player",
+  "license": "MIT",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
