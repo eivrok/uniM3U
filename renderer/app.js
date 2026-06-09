@@ -1,4 +1,5 @@
-import { parseM3U, parseGroup } from './playlist.js';
+import { parseM3UProgressive, parseGroup } from './playlist.js';
+import { formatDownloadProgress } from './format.js';
 import { loadEPG, getProgramsForChannel, getCurrentProgram, getNextProgram } from './epg.js';
 import { Player } from './player.js';
 
@@ -42,8 +43,11 @@ const reloadConfirm = document.getElementById('reload-confirm');
 const searchInput = document.getElementById('search-input');
 const channelList = document.getElementById('channel-list');
 const loadingMsg = document.getElementById('loading-msg');
+const loadingText = document.getElementById('loading-text');
 const categoryTabs = document.getElementById('category-tabs');
 const emptyState = document.getElementById('empty-state');
+const emptyStateText = document.getElementById('empty-state-text');
+const EMPTY_STATE_IDLE = 'Select a channel to start watching';
 const epgBar = document.getElementById('epg-bar');
 const nowPlayingInfo = document.getElementById('now-playing-info');
 const channelNameEl = document.getElementById('channel-name');
@@ -194,6 +198,8 @@ async function isCacheValid(cached, cachedAt) {
 
 async function loadChannels(m3uUrl, epgUrl, forceRefresh = false) {
   loadingMsg.classList.remove('hidden');
+  emptyStateText.textContent = 'Loading your channels…';
+  emptyStateText.classList.add('pulsing');
   channelList.innerHTML = '';
 
   try {
@@ -205,14 +211,26 @@ async function loadChannels(m3uUrl, epgUrl, forceRefresh = false) {
     if (!forceRefresh && cacheValid) {
       raw = cached;
     } else {
-      loadingMsg.textContent = 'Downloading playlist, hang tight…';
-      raw = await api.fetchUrl(m3uUrl);
+      loadingText.textContent = 'Downloading playlist, hang tight…';
+      const stopProgress = api.onFetchProgress(({ url, received, total }) => {
+        if (url !== m3uUrl) return; // ignore the background EPG fetch
+        loadingText.textContent = formatDownloadProgress(received, total);
+      });
+      try {
+        raw = await api.fetchUrl(m3uUrl);
+      } finally {
+        stopProgress();
+      }
       await api.storeSet('playlistCache', raw);
       await api.storeSet('playlistCachedAt', Date.now());
     }
 
-    loadingMsg.textContent = 'Parsing channels, get ready…';
-    state.channels = parseM3U(raw).filter((c) => c.url && !/^=+/.test(c.name.trim()));
+    loadingText.textContent = 'Parsing channels…';
+    const parsed = await parseM3UProgressive(raw, (n) => {
+      loadingText.textContent = `Parsing channels… ${n.toLocaleString()} so far…`;
+    });
+    state.channels = parsed.filter((c) => c.url && !/^=+/.test(c.name.trim()));
+    loadingText.textContent = `Loaded ${state.channels.length.toLocaleString()} channels`;
 
     // Precompute country/sub once per channel (#4) so search and tree-building
     // don't re-run parseGroup on every render. Normalize group here too.
@@ -252,8 +270,10 @@ async function loadChannels(m3uUrl, epgUrl, forceRefresh = false) {
     showMain();
     alert(`Failed to load playlist: ${err.message}`);
   } finally {
-    loadingMsg.textContent = 'Loading channels…';
+    loadingText.textContent = 'Loading channels…';
     loadingMsg.classList.add('hidden');
+    emptyStateText.textContent = EMPTY_STATE_IDLE;
+    emptyStateText.classList.remove('pulsing');
   }
 }
 

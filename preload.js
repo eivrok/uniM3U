@@ -2,6 +2,13 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
   fetchUrl: (url) => ipcRenderer.invoke('fetch-url', url),
+  // Subscribe to download progress. Returns an unsubscribe function — call it
+  // when the download finishes so listeners don't accumulate.
+  onFetchProgress: (cb) => {
+    const listener = (_event, data) => cb(data);
+    ipcRenderer.on('fetch-progress', listener);
+    return () => ipcRenderer.removeListener('fetch-progress', listener);
+  },
   storeGet: (key) => ipcRenderer.invoke('store-get', key),
   storeSet: (key, value) => ipcRenderer.invoke('store-set', key, value),
   storeDelete: (key) => ipcRenderer.invoke('store-delete', key),
