@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseM3U, parseGroup } from './playlist.js';
+import { parseM3U, parseM3UProgressive, parseGroup } from './playlist.js';
 
 describe('parseGroup', () => {
   it('splits country and subcategory on the first " - "', () => {
@@ -60,5 +60,39 @@ describe('parseM3U', () => {
   it('drops an EXTINF entry that has no following url line', () => {
     const dangling = '#EXTINF:-1,Orphan Channel';
     expect(parseM3U(dangling)).toEqual([]);
+  });
+});
+
+describe('parseM3UProgressive', () => {
+  const M3U = [
+    '#EXTM3U',
+    '#EXTINF:-1 group-title="US - News",ABC',
+    'http://stream/abc',
+    '#EXTINF:-1 group-title="US - News",NBC',
+    'http://stream/nbc',
+    '#EXTINF:-1 group-title="UK - Sport",Sky',
+    'http://stream/sky',
+  ].join('\n');
+
+  it('returns the same channels as parseM3U', async () => {
+    const progressive = await parseM3UProgressive(M3U, () => {});
+    expect(progressive).toEqual(parseM3U(M3U));
+  });
+
+  it('reports the final total to onProgress', async () => {
+    const counts = [];
+    await parseM3UProgressive(M3U, (n) => counts.push(n));
+    expect(counts.at(-1)).toBe(3);
+  });
+
+  it('emits a climbing count when chunkSize is small', async () => {
+    const counts = [];
+    await parseM3UProgressive(M3U, (n) => counts.push(n), 1);
+    expect(counts).toEqual([1, 2, 3, 3]);
+  });
+
+  it('works without an onProgress callback', async () => {
+    const channels = await parseM3UProgressive(M3U);
+    expect(channels).toHaveLength(3);
   });
 });

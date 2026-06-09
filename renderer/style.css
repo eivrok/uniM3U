@@ -313,8 +313,26 @@ input:focus-visible,
 
 #loading-msg {
   padding: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
   text-align: center;
-  color: var(--text2);
+  color: var(--text);
+}
+
+#loading-msg .spinner {
+  width: 28px;
+  height: 28px;
+}
+
+@keyframes loading-pulse { from { opacity: 1; } to { opacity: 0.5; } }
+
+/* #loading-text only renders while the playlist loads, so it can pulse
+   unconditionally; the empty-state text pulses only when .pulsing is set. */
+#loading-text,
+#empty-state-text.pulsing {
+  animation: loading-pulse 1.2s ease-in-out infinite alternate;
 }
 
 /* ---- Player area ---- */

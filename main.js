@@ -52,11 +52,19 @@ app.on('window-all-closed', () => {
 });
 
 // IPC: fetch M3U playlist via main process (avoids CORS), follows redirects
-ipcMain.handle('fetch-url', async (_event, url) => {
-  return fetchFollowRedirects(url, 5);
+ipcMain.handle('fetch-url', async (event, url) => {
+  // Report download progress against the originally requested url so the
+  // renderer can correlate events when several fetches run at once.
+  const onProgress = (received, total) =>
+    event.sender.send('fetch-progress', { url, received, total });
+  return fetchFollowRedirects(url, 5, onProgress);
 });
 
-function fetchFollowRedirects(url, maxRedirects) {
+// Emit a progress event at most every PROGRESS_INTERVAL bytes to avoid
+// flooding the IPC channel on large playlists.
+const PROGRESS_INTERVAL = 262144; // 256 KB
+
+function fetchFollowRedirects(url, maxRedirects, onProgress) {
   return new Promise((resolve, reject) => {
     const client = url.startsWith('https') ? https : http;
     const req = client.get(url, {
@@ -68,16 +76,29 @@ function fetchFollowRedirects(url, maxRedirects) {
           ? res.headers.location
           : new URL(res.headers.location, url).href;
         res.destroy();
-        resolve(fetchFollowRedirects(redirectUrl, maxRedirects - 1));
+        resolve(fetchFollowRedirects(redirectUrl, maxRedirects - 1, onProgress));
         return;
       }
       if (res.statusCode !== 200) {
         reject(new Error(`HTTP ${res.statusCode} from server`));
         return;
       }
+      const total = Number(res.headers['content-length']) || 0;
       const chunks = [];
-      res.on('data', (chunk) => chunks.push(chunk));
-      res.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+      let received = 0;
+      let lastEmit = 0;
+      res.on('data', (chunk) => {
+        chunks.push(chunk);
+        received += chunk.length;
+        if (received - lastEmit >= PROGRESS_INTERVAL) {
+          lastEmit = received;
+          onProgress?.(received, total);
+        }
+      });
+      res.on('end', () => {
+        onProgress?.(received, total);
+        resolve(Buffer.concat(chunks).toString('utf8'));
+      });
     });
     req.on('error', reject);
     req.on('timeout', () => { req.destroy(); reject(new Error('Request timed out after 60s')); });

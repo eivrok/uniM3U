@@ -1,9 +1,11 @@
 /**
  * Parses M3U/M3U+ playlist format into channel objects.
  */
-export function parseM3U(raw) {
-  const lines = raw.split('\n').map((l) => l.trim()).filter(Boolean);
-  const channels = [];
+function splitLines(raw) {
+  return raw.split('\n').map((l) => l.trim()).filter(Boolean);
+}
+
+function* channelsFromLines(lines) {
   let current = null;
   let idCounter = 0;
 
@@ -14,11 +16,33 @@ export function parseM3U(raw) {
       // skip other directives
     } else if (current) {
       current.url = line;
-      channels.push(current);
+      yield current;
       current = null;
     }
   }
+}
 
+export function parseM3U(raw) {
+  return [...channelsFromLines(splitLines(raw))];
+}
+
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+/**
+ * Async sibling of parseM3U. Yields to the event loop every `chunkSize`
+ * channels and reports the running count via onProgress, so the UI can show
+ * a climbing total on large playlists. Returns the full channel array.
+ */
+export async function parseM3UProgressive(raw, onProgress, chunkSize = 2000) {
+  const channels = [];
+  for (const channel of channelsFromLines(splitLines(raw))) {
+    channels.push(channel);
+    if (channels.length % chunkSize === 0) {
+      onProgress?.(channels.length);
+      await tick();
+    }
+  }
+  onProgress?.(channels.length);
   return channels;
 }
 

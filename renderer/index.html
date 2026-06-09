@@ -65,7 +65,10 @@
 
         <div id="channel-list-container">
           <div id="channel-list"></div>
-          <div id="loading-msg" class="hidden">Loading channels…</div>
+          <div id="loading-msg" class="hidden">
+            <div class="spinner"></div>
+            <span id="loading-text">Loading channels…</span>
+          </div>
         </div>
       </aside>
 
@@ -88,7 +91,7 @@
         <div id="epg-bar" class="hidden"></div>
         <div id="empty-state">
           <div class="empty-icon">📺</div>
-          <p>Select a channel to start watching</p>
+          <p id="empty-state-text">Select a channel to start watching</p>
         </div>
       </main>
     </div>
