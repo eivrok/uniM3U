@@ -141,6 +141,11 @@ updateLaterBtn.addEventListener('click', () => updateToast.classList.add('hidden
 
 api.onUpdateReady((version) => showUpdateToast(version));
 
+// --- Version label ---
+api.getVersion().then((version) => {
+  document.getElementById('app-version').textContent = `v${version}`;
+});
+
 function debounce(fn, ms) {
   let timer;
   return (...args) => {
