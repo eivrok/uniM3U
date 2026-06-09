@@ -3,6 +3,8 @@ const path = require('path');
 const Store = require('electron-store');
 const https = require('https');
 const http = require('http');
+const { autoUpdater } = require('electron-updater');
+const { shouldAutoUpdate } = require('./updater-policy');
 
 const store = new Store({
   encryptionKey: 'iptv-player-key',
@@ -29,6 +31,20 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 }
 
+function initAutoUpdater() {
+  if (!shouldAutoUpdate(process.platform, app.isPackaged)) return;
+
+  autoUpdater.on('update-downloaded', (info) => {
+    if (mainWindow) mainWindow.webContents.send('update-ready', info.version);
+  });
+  // A failed update must never interrupt playback — log and move on.
+  autoUpdater.on('error', (err) => {
+    console.error('auto-update failed:', err);
+  });
+
+  autoUpdater.checkForUpdates();
+}
+
 app.whenReady().then(() => {
   // Allow IPTV stream content-type
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
@@ -41,6 +57,7 @@ app.whenReady().then(() => {
   });
 
   createWindow();
+  initAutoUpdater();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -109,3 +126,4 @@ function fetchFollowRedirects(url, maxRedirects, onProgress) {
 ipcMain.handle('store-get', (_event, key) => store.get(key));
 ipcMain.handle('store-set', (_event, key, value) => { store.set(key, value); });
 ipcMain.handle('store-delete', (_event, key) => { store.delete(key); });
+ipcMain.handle('quit-and-install', () => autoUpdater.quitAndInstall());
