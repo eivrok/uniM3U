@@ -27,14 +27,7 @@ jobs:
 
       - run: npm test
 
-      - name: Build
-        run: npm run build -- --publish never
-
-      - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          draft: true
-          files: |
-            dist/*.dmg
-            dist/*.exe
-            dist/*.AppImage
+      - name: Build and publish
+        run: npm run build -- --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

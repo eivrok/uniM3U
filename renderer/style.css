@@ -726,3 +726,30 @@ input:focus-visible,
 .country-check:hover { background: var(--bg3); }
 .country-check input { accent-color: var(--accent); cursor: pointer; }
 .country-check .cc-count { margin-left: auto; color: var(--text3); font-size: 11px; }
+
+/* ---- Update toast ---- */
+#update-toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border-radius: 10px;
+  background: var(--bg2, #1b1b1b);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+  color: var(--text);
+  animation: toast-in 0.25s ease-out;
+}
+
+#update-toast .update-icon { color: var(--accent); font-size: 18px; }
+
+#update-toast button { margin-left: 4px; }
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}

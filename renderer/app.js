@@ -47,6 +47,10 @@ const loadingText = document.getElementById('loading-text');
 const categoryTabs = document.getElementById('category-tabs');
 const emptyState = document.getElementById('empty-state');
 const emptyStateText = document.getElementById('empty-state-text');
+const updateToast = document.getElementById('update-toast');
+const updateToastText = document.getElementById('update-toast-text');
+const updateRestartBtn = document.getElementById('update-restart');
+const updateLaterBtn = document.getElementById('update-later');
 const EMPTY_STATE_IDLE = 'Select a channel to start watching';
 const epgBar = document.getElementById('epg-bar');
 const nowPlayingInfo = document.getElementById('now-playing-info');
@@ -125,6 +129,17 @@ function showToast(msg, duration = 3000) {
   toast.classList.add('show');
   setTimeout(() => toast.classList.remove('show'), duration);
 }
+
+// --- Auto-update toast ---
+function showUpdateToast(version) {
+  updateToastText.textContent = `Update ready (v${version})`;
+  updateToast.classList.remove('hidden');
+}
+
+updateRestartBtn.addEventListener('click', () => api.restartToUpdate());
+updateLaterBtn.addEventListener('click', () => updateToast.classList.add('hidden'));
+
+api.onUpdateReady((version) => showUpdateToast(version));
 
 function debounce(fn, ms) {
   let timer;

@@ -9,6 +9,12 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('fetch-progress', listener);
     return () => ipcRenderer.removeListener('fetch-progress', listener);
   },
+  onUpdateReady: (cb) => {
+    const listener = (_event, version) => cb(version);
+    ipcRenderer.on('update-ready', listener);
+    return () => ipcRenderer.removeListener('update-ready', listener);
+  },
+  restartToUpdate: () => ipcRenderer.invoke('quit-and-install'),
   storeGet: (key) => ipcRenderer.invoke('store-get', key),
   storeSet: (key, value) => ipcRenderer.invoke('store-set', key, value),
   storeDelete: (key) => ipcRenderer.invoke('store-delete', key),
