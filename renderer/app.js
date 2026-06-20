@@ -2,6 +2,7 @@ import { parseM3UProgressive, parseGroup } from './playlist.js';
 import { formatDownloadProgress } from './format.js';
 import { loadEPG, getProgramsForChannel, getCurrentProgram, getNextProgram } from './epg.js';
 import { Player } from './player.js';
+import { clampIdleSeconds, formatIdleLabel, decideChrome } from './idle.js';
 
 const api = window.api;
 
@@ -23,6 +24,7 @@ const state = {
   expandedCountries: new Set(),
   visibleCountries: null,     // null = all visible; otherwise a Set of allowed country names
   tree: null,                 // memoized country tree; rebuilt only when channels reload
+  idleHideSeconds: 5,         // seconds of inactivity before chrome hides; 0 = disabled
 };
 
 // --- DOM refs ---
@@ -31,6 +33,8 @@ const mainScreen = document.getElementById('main-screen');
 const m3uInput = document.getElementById('m3u-url-input');
 const epgInput = document.getElementById('epg-url-input');
 const cacheTtlSelect = document.getElementById('cache-ttl-select');
+const idleHideSlider = document.getElementById('idle-hide-slider');
+const idleHideValue = document.getElementById('idle-hide-value');
 const lastDownloadNote = document.getElementById('last-download-note');
 const saveBtn = document.getElementById('save-settings-btn');
 const cancelBtn = document.getElementById('cancel-settings-btn');
@@ -101,23 +105,63 @@ videoEl.addEventListener('playing', hideSpinner);
 videoEl.addEventListener('waiting', () => playerLoading.classList.remove('hidden'));
 videoEl.addEventListener('error', hideSpinner);
 
-// --- Now-playing overlay: reveal on mouse move, fade after 3s idle ---
-const playerWrapper = document.getElementById('player-wrapper');
+// --- Idle controller: reveal chrome on input, enter immersive after idle ---
+// Folds in the old now-playing-overlay fade. A single ticking check uses the
+// pure shouldHideChrome() so the timing rule stays testable in idle.test.js.
+// (mainScreen is declared with the other DOM refs above.)
 const playerOverlay = document.getElementById('player-overlay');
-let overlayTimer = null;
+let lastInputAt = Date.now();
+let idleTimer = null;
+let wasImmersive = false;
 
-function revealOverlay() {
-  if (!state.activeChannelId) return; // nothing playing → nothing to show
-  playerOverlay.classList.add('show');
-  clearTimeout(overlayTimer);
-  overlayTimer = setTimeout(() => playerOverlay.classList.remove('show'), 3000);
+function isPlaying() {
+  return Boolean(state.activeChannelId);
 }
 
-playerWrapper.addEventListener('mousemove', revealOverlay);
-playerWrapper.addEventListener('mouseleave', () => {
-  clearTimeout(overlayTimer);
-  playerOverlay.classList.remove('show');
-});
+function applyIdleState() {
+  const { immersive, overlay } = decideChrome({
+    playing: isPlaying(),
+    settingsOpen: !settingsScreen.classList.contains('hidden'),
+    idleHideSeconds: state.idleHideSeconds,
+    idleElapsedMs: Date.now() - lastInputAt,
+  });
+  mainScreen.classList.toggle('immersive', immersive);
+  playerOverlay.classList.toggle('show', overlay);
+
+  // Snap the window to the video aspect on the way into immersive, restore it
+  // on the way out. Only act on the transition, not every 500ms tick.
+  if (immersive !== wasImmersive) {
+    wasImmersive = immersive;
+    if (immersive) {
+      const aspect = videoEl.videoWidth / videoEl.videoHeight;
+      if (Number.isFinite(aspect) && aspect > 0) api.immersiveFill(aspect);
+    } else {
+      api.immersiveFillClear();
+    }
+  }
+}
+
+function revealChrome() {
+  lastInputAt = Date.now();
+  // Act immediately only when input must change something: leaving immersive,
+  // or re-showing a faded overlay. While the overlay is already up and we're
+  // not immersive, continuous mouse movement is a no-op beyond the timestamp —
+  // the 500ms loop owns the steady-state fade.
+  if (mainScreen.classList.contains('immersive') || !playerOverlay.classList.contains('show')) {
+    applyIdleState();
+  }
+}
+
+// One timer drives the transition; 500ms resolution is fine for a multi-second
+// delay. activeChannelId is never cleared once a channel starts, so the loop
+// simply keeps running for the rest of the session after the first play.
+function startIdleLoop() {
+  if (idleTimer) return;
+  idleTimer = setInterval(applyIdleState, 500);
+}
+
+document.addEventListener('mousemove', revealChrome);
+document.addEventListener('keydown', revealChrome);
 
 // --- Toast ---
 const toast = document.createElement('div');
@@ -163,12 +207,16 @@ async function init() {
   const exp = await api.storeGet('expandedCountries');
   const fl = await api.storeGet('failedLogos');
   const ttlH = await api.storeGet('cacheTtlHours');
+  const idleH = await api.storeGet('idleHideSeconds');
 
   if (favs) state.favorites = new Set(favs);
   state.visibleCountries = Array.isArray(vis) ? new Set(vis) : null;
   if (Array.isArray(exp)) state.expandedCountries = new Set(exp);
   if (Array.isArray(fl)) failedLogos = new Set(fl);
   cacheTtlSelect.value = String(ttlH == null ? DEFAULT_TTL_HOURS : ttlH);
+  state.idleHideSeconds = clampIdleSeconds(idleH == null ? 5 : idleH);
+  idleHideSlider.value = String(state.idleHideSeconds);
+  idleHideValue.textContent = formatIdleLabel(state.idleHideSeconds);
   updateLastDownloadNote();
 
   if (m3uUrl) {
@@ -181,11 +229,27 @@ async function init() {
   }
 }
 
-function showSettings() {
+// Saved playlist/EPG URLs as of when settings opened, so the Save button can
+// tell whether saving will trigger a (re)download or just persist preferences.
+let savedM3uUrl = '';
+let savedEpgUrl = '';
+
+function refreshSaveLabel() {
+  const willLoad =
+    state.channels.length === 0 ||
+    m3uInput.value.trim() !== savedM3uUrl ||
+    (epgInput.value.trim() || '') !== savedEpgUrl;
+  saveBtn.textContent = willLoad ? 'Save & Load Channels' : 'Save';
+}
+
+async function showSettings() {
   // Cancel only makes sense once channels are loaded — on first run there's
   // nothing to go back to.
   cancelBtn.classList.toggle('hidden', state.channels.length === 0);
   updateLastDownloadNote();
+  savedM3uUrl = (await api.storeGet('m3uUrl')) || '';
+  savedEpgUrl = (await api.storeGet('epgUrl')) || '';
+  refreshSaveLabel();
   settingsScreen.classList.remove('hidden');
   mainScreen.classList.add('hidden');
 }
@@ -672,7 +736,8 @@ function playChannel(channel) {
   emptyState.style.display = 'none';
   nowPlayingInfo.classList.remove('hidden');
   channelNameEl.textContent = channel.name;
-  revealOverlay();
+  revealChrome();
+  startIdleLoop();
 
   showSpinner();
   player.load(channel.url);
@@ -798,6 +863,11 @@ saveBtn.addEventListener('click', async () => {
     await api.storeSet('m3uUrl', m3uUrl);
     await api.storeSet('epgUrl', epgUrl || null);
     await api.storeSet('cacheTtlHours', Number(cacheTtlSelect.value));
+    state.idleHideSeconds = clampIdleSeconds(idleHideSlider.value);
+    await api.storeSet('idleHideSeconds', state.idleHideSeconds);
+    // Snapshot the now-saved URLs so a reopen reflects "no change" correctly.
+    savedM3uUrl = m3uUrl;
+    savedEpgUrl = epgUrl || '';
 
     showMain();
 
@@ -813,7 +883,7 @@ saveBtn.addEventListener('click', async () => {
     alert('Error: ' + err.message);
   } finally {
     saveBtn.disabled = false;
-    saveBtn.textContent = 'Save & Load Channels';
+    refreshSaveLabel();
   }
 });
 
@@ -825,6 +895,14 @@ cancelBtn.addEventListener('click', () => {
 });
 
 settingsBtn.addEventListener('click', showSettings);
+
+// Keep the Save button label honest as the user edits the URLs.
+m3uInput.addEventListener('input', refreshSaveLabel);
+epgInput.addEventListener('input', refreshSaveLabel);
+
+idleHideSlider.addEventListener('input', () => {
+  idleHideValue.textContent = formatIdleLabel(Number(idleHideSlider.value));
+});
 
 // --- Reload (force re-download playlist), behind a confirmation ---
 function openReloadModal() {
