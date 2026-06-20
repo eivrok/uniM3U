@@ -19,4 +19,8 @@ contextBridge.exposeInMainWorld('api', {
   storeGet: (key) => ipcRenderer.invoke('store-get', key),
   storeSet: (key, value) => ipcRenderer.invoke('store-set', key, value),
   storeDelete: (key) => ipcRenderer.invoke('store-delete', key),
+  // Immersive mode: snap the window to the playing video's aspect ratio to
+  // drop letterbox bars, then restore the previous size when chrome returns.
+  immersiveFill: (aspect) => ipcRenderer.invoke('immersive-fill', aspect),
+  immersiveFillClear: () => ipcRenderer.invoke('immersive-fill-clear'),
 });

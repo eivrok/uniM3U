@@ -30,6 +30,10 @@
             <option value="-1">Only when I refresh manually</option>
           </select>
         </label>
+        <label>Hide controls after
+          <input type="range" id="idle-hide-slider" min="0" max="30" step="1" value="5" />
+          <span id="idle-hide-value" class="settings-note">5s</span>
+        </label>
         <p class="settings-note" id="last-download-note"></p>
         <div class="settings-actions">
           <button id="cancel-settings-btn" class="btn-secondary hidden">Cancel</button>

@@ -128,3 +128,26 @@ ipcMain.handle('store-set', (_event, key, value) => { store.set(key, value); });
 ipcMain.handle('store-delete', (_event, key) => { store.delete(key); });
 ipcMain.handle('quit-and-install', () => autoUpdater.quitAndInstall());
 ipcMain.handle('app-version', () => app.getVersion());
+
+// IPC: immersive aspect-snap. Shrink the over-sized dimension to the video's
+// aspect ratio so letterbox bars disappear, remembering the prior bounds so
+// the window pops back to its original size when chrome is revealed.
+let preFillBounds = null;
+ipcMain.handle('immersive-fill', (_event, aspect) => {
+  if (!mainWindow || typeof aspect !== 'number' || !Number.isFinite(aspect) || aspect <= 0) return;
+  // Maximized/fullscreen windows can't be freely resized — leave them be.
+  if (preFillBounds || mainWindow.isMaximized() || mainWindow.isFullScreen()) return;
+  preFillBounds = mainWindow.getBounds();
+  const [w, h] = mainWindow.getContentSize();
+  // Keep the picture the same size; trim whichever axis is too long.
+  if (w / h > aspect) {
+    mainWindow.setContentSize(Math.round(h * aspect), h);
+  } else {
+    mainWindow.setContentSize(w, Math.round(w / aspect));
+  }
+});
+ipcMain.handle('immersive-fill-clear', () => {
+  if (!mainWindow || !preFillBounds) return;
+  mainWindow.setBounds(preFillBounds);
+  preFillBounds = null;
+});

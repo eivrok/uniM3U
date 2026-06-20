@@ -762,3 +762,12 @@ input:focus-visible,
   text-align: left;
   color: var(--text2);
 }
+
+/* --- Immersive idle mode: chrome hidden, video fills window --- */
+#main-screen.immersive #sidebar { display: none; }
+#main-screen.immersive #epg-bar { display: none; }
+#main-screen.immersive #player-overlay { opacity: 0; pointer-events: none; }
+#main-screen.immersive #player-area { cursor: none; }
+/* Chromium-only: hide the native <video> controls without touching the
+   controls attribute, so revealing chrome restores them instantly. */
+#main-screen.immersive video::-webkit-media-controls-enclosure { display: none !important; }
