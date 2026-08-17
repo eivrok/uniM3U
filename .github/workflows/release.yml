@@ -9,7 +9,27 @@ permissions:
   contents: write
 
 jobs:
+  # The draft must exist before any builder starts. Three runners calling
+  # electron-builder concurrently each fail to find a release for the tag and
+  # create their own, which produced five drafts for v1.4.1.
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create draft release if absent
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Draft for $TAG already exists, reusing it."
+          else
+            gh release create "$TAG" --draft --title "${TAG#v}" --generate-notes
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+
   release:
+    needs: create-release
     strategy:
       fail-fast: false
       matrix:
@@ -31,3 +51,17 @@ jobs:
         run: npm run build -- --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # `needs` requires every matrix leg to succeed, so a half-built release stays
+  # a draft instead of going out with platforms missing.
+  publish-release:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Publish the draft
+        run: gh release edit "$TAG" --draft=false --latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
