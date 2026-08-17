@@ -29,7 +29,7 @@
     "productName": "UniM3U",
     "publish": {
       "provider": "github",
-      "releaseType": "release"
+      "releaseType": "draft"
     },
     "extraResources": [
       "THIRD-PARTY-LICENSES.txt"
