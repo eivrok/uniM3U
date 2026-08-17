@@ -60,6 +60,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # A green build is not proof the upload landed: v1.4.0 published with only
+      # the mac assets while every job reported success, which left
+      # electron-updater with no latest.yml / latest-linux.yml to read.
+      - name: Verify every platform uploaded
+        run: |
+          assets=$(gh release view "$TAG" --json assets -q '.assets[].name')
+          missing=0
+          for required in latest.yml latest-mac.yml latest-linux.yml .exe .dmg .AppImage; do
+            if ! printf '%s\n' "$assets" | grep -qF -- "$required"; then
+              echo "::error::$TAG is missing $required"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "Leaving $TAG as a draft."
+            exit 1
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+
       - name: Publish the draft
         run: gh release edit "$TAG" --draft=false --latest
         env:
