@@ -1,4 +1,7 @@
-import { parseM3UProgressive, parseGroup } from './playlist.js';
+import { parseM3U, parseM3UProgressive, parseGroup } from './playlist.js';
+import { isCacheFresh, DEFAULT_TTL_HOURS } from './cache-policy.js';
+import { migrateFavorites } from './favorites-migration.js';
+import { toChannels, toEpisodes } from './xtream.js';
 import { formatDownloadProgress } from './format.js';
 import { loadEPG, getProgramsForChannel, getCurrentProgram, getNextProgram } from './epg.js';
 import { Player } from './player.js';
@@ -21,10 +24,14 @@ const state = {
   activeFilter: 'all',        // 'all' | 'favorites'
   view: 'browse',             // 'browse' (country tree) | 'channels' (drilled into a group)
   activeGroup: null,          // group-title string when view === 'channels'
+  activeSeries: null,         // the series channel object when view === 'episodes'
   expandedCountries: new Set(),
   visibleCountries: null,     // null = all visible; otherwise a Set of allowed country names
   tree: null,                 // memoized country tree; rebuilt only when channels reload
   idleHideSeconds: 5,         // seconds of inactivity before chrome hides; 0 = disabled
+  xtreamCreds: null,          // {origin, username, password} when the source is Xtream
+  episodeCache: new Map(),    // series_id -> episode channel rows, fetched on demand
+  episodePending: new Set(),  // series_id currently being fetched — blocks duplicate in-flight requests
 };
 
 // --- DOM refs ---
@@ -33,6 +40,7 @@ const mainScreen = document.getElementById('main-screen');
 const m3uInput = document.getElementById('m3u-url-input');
 const epgInput = document.getElementById('epg-url-input');
 const cacheTtlSelect = document.getElementById('cache-ttl-select');
+const fastApiCheck = document.getElementById('fast-api-check');
 const idleHideSlider = document.getElementById('idle-hide-slider');
 const idleHideValue = document.getElementById('idle-hide-value');
 const lastDownloadNote = document.getElementById('last-download-note');
@@ -200,20 +208,29 @@ function debounce(fn, ms) {
 
 // --- Init ---
 async function init() {
-  const m3uUrl = await api.storeGet('m3uUrl');
-  const epgUrl = await api.storeGet('epgUrl');
-  const favs = await api.storeGet('favorites');
-  const vis = await api.storeGet('visibleCountries');
-  const exp = await api.storeGet('expandedCountries');
-  const fl = await api.storeGet('failedLogos');
-  const ttlH = await api.storeGet('cacheTtlHours');
-  const idleH = await api.storeGet('idleHideSeconds');
+  const {
+    m3uUrl,
+    epgUrl,
+    favorites: favs,
+    visibleCountries: vis,
+    expandedCountries: exp,
+    failedLogos: fl,
+    cacheTtlHours: ttlH,
+    idleHideSeconds: idleH,
+    useXtreamApi,
+  } = await api.storeGetMany([
+    'm3uUrl', 'epgUrl', 'favorites', 'visibleCountries',
+    'expandedCountries', 'failedLogos', 'cacheTtlHours', 'idleHideSeconds',
+    'useXtreamApi',
+  ]);
 
   if (favs) state.favorites = new Set(favs);
   state.visibleCountries = Array.isArray(vis) ? new Set(vis) : null;
   if (Array.isArray(exp)) state.expandedCountries = new Set(exp);
   if (Array.isArray(fl)) failedLogos = new Set(fl);
   cacheTtlSelect.value = String(ttlH == null ? DEFAULT_TTL_HOURS : ttlH);
+  // Unset means on: the fast path is the default, the checkbox is an escape hatch.
+  fastApiCheck.checked = useXtreamApi !== false;
   state.idleHideSeconds = clampIdleSeconds(idleH == null ? 5 : idleH);
   idleHideSlider.value = String(state.idleHideSeconds);
   idleHideValue.textContent = formatIdleLabel(state.idleHideSeconds);
@@ -233,12 +250,14 @@ async function init() {
 // tell whether saving will trigger a (re)download or just persist preferences.
 let savedM3uUrl = '';
 let savedEpgUrl = '';
+let savedFastApi = true;
 
 function refreshSaveLabel() {
   const willLoad =
     state.channels.length === 0 ||
     m3uInput.value.trim() !== savedM3uUrl ||
-    (epgInput.value.trim() || '') !== savedEpgUrl;
+    (epgInput.value.trim() || '') !== savedEpgUrl ||
+    fastApiCheck.checked !== savedFastApi;
   saveBtn.textContent = willLoad ? 'Save & Load Channels' : 'Save';
 }
 
@@ -247,15 +266,22 @@ async function showSettings() {
   // nothing to go back to.
   cancelBtn.classList.toggle('hidden', state.channels.length === 0);
   updateLastDownloadNote();
-  savedM3uUrl = (await api.storeGet('m3uUrl')) || '';
-  savedEpgUrl = (await api.storeGet('epgUrl')) || '';
+  const urls = await api.storeGetMany(['m3uUrl', 'epgUrl', 'useXtreamApi']);
+  savedM3uUrl = urls.m3uUrl || '';
+  savedEpgUrl = urls.epgUrl || '';
+  savedFastApi = urls.useXtreamApi !== false;
+  fastApiCheck.checked = savedFastApi;
   refreshSaveLabel();
   settingsScreen.classList.remove('hidden');
   mainScreen.classList.add('hidden');
 }
 
 async function updateLastDownloadNote() {
-  const at = await api.storeGet('playlistCachedAt');
+  // The two sources keep separate clocks (#5) — an Xtream refetch must not
+  // make a stale M3U cache file look freshly downloaded, or vice versa.
+  // Show whichever is more recent so the note stays honest either way.
+  const { playlistCachedAt, xtreamCachedAt } = await api.storeGetMany(['playlistCachedAt', 'xtreamCachedAt']);
+  const at = Math.max(playlistCachedAt || 0, xtreamCachedAt || 0) || null;
   lastDownloadNote.textContent = at
     ? `Last full download: ${new Date(at).toLocaleString()}`
     : 'No playlist downloaded yet.';
@@ -267,17 +293,131 @@ function showMain() {
 }
 
 // --- Load channels ---
-const DEFAULT_TTL_HOURS = 24;
 
-// How long a cached playlist stays valid, from the user setting:
-//   -1 = never auto-expire (manual refresh only) · 0 = always re-download · N hours
-async function isCacheValid(cached, cachedAt) {
-  if (!cached || !cachedAt) return false;
-  const ttlH = await api.storeGet('cacheTtlHours');
-  const hours = (ttlH == null) ? DEFAULT_TTL_HOURS : Number(ttlH);
-  if (hours < 0) return true;       // manual only — cache never expires on its own
-  if (hours === 0) return false;    // always re-download on launch
-  return Date.now() - cachedAt < hours * 60 * 60 * 1000;
+/**
+ * Downloads the playlist, first asking the server whether the cached copy is
+ * still current. On a large playlist a 304 is the difference between a full
+ * transfer and nothing at all. Returns the raw M3U text.
+ */
+async function downloadPlaylist(m3uUrl, validators, lap) {
+  loadingText.textContent = validators
+    ? 'Checking for playlist updates…'
+    : 'Downloading playlist, hang tight…';
+  const stopProgress = api.onFetchProgress(({ url, received, total }) => {
+    if (url !== m3uUrl) return; // ignore the background EPG fetch
+    loadingText.textContent = formatDownloadProgress(received, total);
+  });
+  let result;
+  try {
+    result = await api.fetchPlaylist(m3uUrl, validators);
+  } finally {
+    stopProgress();
+  }
+  lap(validators ? 'revalidate (network + IPC in)' : 'download (network + IPC in)');
+
+  if (result.notModified) {
+    // A 304 without validators means the server is misbehaving; treat it as an
+    // error rather than retrying forever.
+    if (!validators) throw new Error('Server sent 304 to an unconditional request');
+    const cached = await api.cacheRead();
+    if (cached) {
+      // Confirmed current — restart the TTL clock without re-downloading.
+      // Also reassert the format: reached while playlistFormat === 'xtream'
+      // (a provider switch mid-flight), this is M3U content, and the store
+      // must say so or the next launch serves stale xtream-cache.json.
+      await api.storeSetMany({ playlistCachedAt: Date.now(), playlistFormat: 'm3u' });
+      lap('cache reuse (304)');
+      return cached;
+    }
+    // Validators outlived the cache file. Ask again, unconditionally.
+    return downloadPlaylist(m3uUrl, null, lap);
+  }
+
+  await api.cacheWrite(result.body);
+  await api.storeSetMany({
+    playlistCachedAt: Date.now(),
+    playlistEtag: result.etag,
+    playlistLastModified: result.lastModified,
+    playlistFormat: 'm3u',
+  });
+  lap('cache write (IPC out + fsync)');
+  return result.body;
+}
+
+/**
+ * Favourites saved before this release are positional `ch-N` ids from M3U parse
+ * order. The normal migration only runs on the M3U path, but an Xtream user
+ * takes that path once at most and then never again — so without this their
+ * saved favourites would keep ids that match nothing, and every star would
+ * silently disappear on upgrade.
+ *
+ * Resolves them against the old M3U cache still on disk. Runs at most once: the
+ * flag is set even when nothing resolved, so a favourite whose channel has gone
+ * from the playlist can't make every launch re-read a 70 MB file.
+ */
+async function migrateLegacyFavorites() {
+  if (![...state.favorites].some((f) => /^ch-\d+$/.test(f))) return;
+  if (await api.storeGet('favoritesLegacyMigrated')) return;
+
+  const legacy = await api.cacheRead();
+  if (legacy) {
+    const migrated = migrateFavorites([...state.favorites], parseM3U(legacy));
+    if (migrated.changed) {
+      state.favorites = new Set(migrated.favorites);
+      await api.storeSet('favorites', migrated.favorites);
+    }
+  }
+  // Set even when the cache was missing: there is nothing left to resolve
+  // against, so retrying on every launch would only burn a file read.
+  await api.storeSet('favoritesLegacyMigrated', true);
+}
+
+/**
+ * Loads the catalogue from an Xtream panel, using the cached copy when the TTL
+ * still allows it. Throws when the panel cannot serve player_api.php, which is
+ * the caller's signal to fall back to the M3U.
+ */
+async function loadXtream(m3uUrl, forceRefresh, xtreamCachedAt, ttlH, lap) {
+  const format = await api.storeGet('playlistFormat');
+  // playlistFormat is cleared to null whenever the saved url changes (see the
+  // settings Save handler), so a stale value here can only mean "still the
+  // same Xtream provider" — safe to trust for the cache-hit check below.
+
+  // A cache written by the M3U source can never be read as Xtream JSON.
+  if (!forceRefresh && format === 'xtream' && isCacheFresh(xtreamCachedAt, ttlH)) {
+    const cached = await api.xtreamCacheRead();
+    if (cached) {
+      const payloads = JSON.parse(cached);
+      lap('xtream cache read');
+      return asCatalogue(payloads);
+    }
+  }
+
+  loadingText.textContent = 'Loading catalogue…';
+  const payloads = await api.fetchXtream(m3uUrl);
+  if (!payloads) return null; // ordinary M3U url — caller uses the M3U path
+  lap('xtream fetch (network + IPC in)');
+
+  await api.xtreamCacheWrite(JSON.stringify(payloads));
+  // Its own clock (#5): playlistCachedAt belongs to the M3U cache file, which
+  // this write never touches. Sharing the key would make a stale
+  // playlist-cache.m3u look freshly downloaded on every Xtream refetch.
+  await api.storeSetMany({ xtreamCachedAt: Date.now(), playlistFormat: 'xtream' });
+  lap('xtream cache write');
+
+  return asCatalogue(payloads);
+}
+
+/**
+ * A panel that answers every catalogue call with an empty list is answering,
+ * but has nothing to serve. Treating that as success would leave the user
+ * staring at an empty app while their M3U still works, so it is reported as
+ * unavailable and the caller falls back.
+ */
+function asCatalogue(payloads) {
+  const channels = toChannels(payloads, payloads.creds);
+  if (channels.length === 0) throw new Error('XtreamUnavailable: catalogue is empty');
+  return { channels, creds: payloads.creds };
 }
 
 async function loadChannels(m3uUrl, epgUrl, forceRefresh = false) {
@@ -286,34 +426,84 @@ async function loadChannels(m3uUrl, epgUrl, forceRefresh = false) {
   emptyStateText.classList.add('pulsing');
   channelList.innerHTML = '';
 
-  try {
-    let raw;
-    const cached = await api.storeGet('playlistCache');
-    const cachedAt = await api.storeGet('playlistCachedAt');
-    const cacheValid = await isCacheValid(cached, cachedAt);
+  // TEMPORARY perf instrumentation — strip once the refresh bottleneck is found.
+  const perfLaps = [];
+  const perfStart = performance.now();
+  let perfLast = perfStart;
+  const lap = (phase) => {
+    const now = performance.now();
+    perfLaps.push({ phase, ms: Math.round(now - perfLast) });
+    perfLast = now;
+  };
 
-    if (!forceRefresh && cacheValid) {
-      raw = cached;
-    } else {
-      loadingText.textContent = 'Downloading playlist, hang tight…';
-      const stopProgress = api.onFetchProgress(({ url, received, total }) => {
-        if (url !== m3uUrl) return; // ignore the background EPG fetch
-        loadingText.textContent = formatDownloadProgress(received, total);
-      });
-      try {
-        raw = await api.fetchUrl(m3uUrl);
-      } finally {
-        stopProgress();
+  try {
+    const {
+      playlistCachedAt: cachedAt,
+      xtreamCachedAt,
+      cacheTtlHours: ttlH,
+      lastChannelUrl,
+      playlistEtag,
+      playlistLastModified,
+      useXtreamApi,
+    } = await api.storeGetMany([
+      'playlistCachedAt', 'xtreamCachedAt', 'cacheTtlHours', 'lastChannelUrl',
+      'playlistEtag', 'playlistLastModified', 'useXtreamApi',
+    ]);
+    lap('settings read');
+
+    let raw = null;
+
+    // An Xtream panel serves the same catalogue as JSON far more cheaply than
+    // as a generated M3U. Fall back to the M3U whenever the API is unusable.
+    // Unset means on. The escape hatch exists for panels whose API answers
+    // successfully but incompletely — that degrades silently, so the app cannot
+    // detect it and fall back on the user's behalf the way it does for a hard
+    // failure.
+    let fromXtream = false;
+    try {
+      const parsed = useXtreamApi === false
+        ? null
+        : await loadXtream(m3uUrl, forceRefresh, xtreamCachedAt, ttlH, lap);
+      if (parsed) {
+        state.channels = parsed.channels;
+        state.xtreamCreds = parsed.creds;
+        fromXtream = true;
       }
-      await api.storeSet('playlistCache', raw);
-      await api.storeSet('playlistCachedAt', Date.now());
+    } catch (err) {
+      // A panel that cannot serve player_api.php is expected, not exceptional.
+      console.warn('xtream api unavailable, falling back to the m3u:', err.message);
+      showToast('Fast API unavailable — using the full playlist');
     }
 
-    loadingText.textContent = 'Parsing channels…';
-    const parsed = await parseM3UProgressive(raw, (n) => {
-      loadingText.textContent = `Parsing channels… ${n.toLocaleString()} so far…`;
-    });
-    state.channels = parsed.filter((c) => c.url && !/^=+/.test(c.name.trim()));
+    if (!fromXtream) {
+      state.xtreamCreds = null;
+      // Only pull the (large) cache file off disk when it would actually be
+      // used — reached only once the Xtream path is ruled out, so a fresh
+      // Xtream launch never reads and discards the 73.7 MB M3U cache.
+      raw = !forceRefresh && isCacheFresh(cachedAt, ttlH)
+        ? await api.cacheRead()
+        : null;
+      lap('cache read (file + IPC in)');
+
+      if (!raw) {
+        // Revalidate rather than re-download, but only when there is a cached
+        // copy for the server to confirm against.
+        const validators = cachedAt && (playlistEtag || playlistLastModified)
+          ? { etag: playlistEtag, lastModified: playlistLastModified }
+          : null;
+        raw = await downloadPlaylist(m3uUrl, validators, lap);
+      }
+    }
+
+    if (!fromXtream) {
+      loadingText.textContent = 'Parsing channels…';
+      const parsed = await parseM3UProgressive(raw, (n) => {
+        loadingText.textContent = `Parsing channels… ${n.toLocaleString()} so far…`;
+      });
+      lap('parse');
+      state.channels = parsed.filter((c) => c.url && !/^=+/.test(c.name.trim()));
+      lap('filter');
+    }
     loadingText.textContent = `Loaded ${state.channels.length.toLocaleString()} channels`;
 
     // Precompute country/sub once per channel (#4) so search and tree-building
@@ -324,7 +514,26 @@ async function loadChannels(m3uUrl, epgUrl, forceRefresh = false) {
       c.country = country;
       c.sub = sub;
     }
+    if (!fromXtream) {
+      // `ch-N` is M3U parse order and matches nothing meaningful in the Xtream
+      // id space, so migrating there would repoint favourites at random rows.
+      const migrated = migrateFavorites([...state.favorites], state.channels);
+      if (migrated.changed) {
+        state.favorites = new Set(migrated.favorites);
+        await api.storeSet('favorites', migrated.favorites);
+      }
+    } else {
+      // An Xtream user never reaches the branch above, so their pre-upgrade
+      // favourites have to be resolved against the old M3U cache instead.
+      await migrateLegacyFavorites();
+    }
     state.tree = null; // invalidate memoized tree (#3)
+    // Episode rows carry urls built from the previous load's creds; a provider
+    // switch (or even a same-provider reload) must not let a stale entry point
+    // at the old host with the old credentials.
+    state.episodeCache.clear();
+    state.episodePending.clear();
+    lap('precompute country/sub');
 
     // Load EPG in background
     if (epgUrl) {
@@ -337,12 +546,14 @@ async function loadChannels(m3uUrl, epgUrl, forceRefresh = false) {
     state.view = 'browse';
     state.activeGroup = null;
     render();
+    lap('first render (browse)');
+    console.table(perfLaps);
+    console.log(`[perf] loadChannels total: ${Math.round(performance.now() - perfStart)} ms for ${state.channels.length} channels`);
 
     // Resume the last-played channel, matched by stable url (not the index id).
     // Drill into its group so the row is visible and highlighted.
-    const lastUrl = await api.storeGet('lastChannelUrl');
-    if (lastUrl) {
-      const last = state.channels.find((c) => c.url === lastUrl);
+    if (lastChannelUrl) {
+      const last = state.channels.find((c) => c.url === lastChannelUrl);
       if (last) {
         state.view = 'channels';
         state.activeGroup = last.group;
@@ -427,8 +638,20 @@ function render() {
 
   // Favorites: flat list, shown regardless of country whitelist.
   if (state.activeFilter === 'favorites') {
-    const favs = state.channels.filter((c) => state.favorites.has(c.id));
+    const favs = state.channels.filter((c) => c.url && state.favorites.has(c.url));
     renderChannelItems(favs, 'No favorites yet — tap ★ on a channel');
+    return;
+  }
+
+  // Drilled into a series: its episodes, fetched on demand.
+  if (state.view === 'episodes' && state.activeSeries) {
+    renderBackHeader(state.activeSeries.group);
+    const eps = state.episodeCache.get(state.activeSeries.seriesId);
+    if (eps) {
+      renderChannelItems(eps, 'This series has no episodes', true);
+    } else {
+      renderHint('Loading episodes…');
+    }
     return;
   }
 
@@ -621,14 +844,27 @@ function buildChannelItem(channel, epgData) {
 
   item.appendChild(info);
 
+  // A series is a container, not a stream: it has no url to favourite or play.
+  // Favourites are keyed on url, and the fav-button below has no null guard —
+  // routing a series row into it would call toggleFavorite(null) and persist
+  // null into the user's saved favourites.
+  if (channel.kind === 'series') {
+    const chevron = document.createElement('span');
+    chevron.className = 'series-chevron';
+    chevron.textContent = '›';
+    item.appendChild(chevron);
+    item.addEventListener('click', () => openSeries(channel));
+    return item;
+  }
+
   // Fav button
   const favBtn = document.createElement('button');
-  favBtn.className = 'fav-btn' + (state.favorites.has(channel.id) ? ' active' : '');
+  favBtn.className = 'fav-btn' + (state.favorites.has(channel.url) ? ' active' : '');
   favBtn.textContent = '★';
   favBtn.title = 'Favorite';
   favBtn.addEventListener('click', (e) => {
     e.stopPropagation();
-    toggleFavorite(channel.id);
+    toggleFavorite(channel.url);
     favBtn.classList.toggle('active');
   });
   item.appendChild(favBtn);
@@ -663,7 +899,66 @@ function drillInto(group) {
   channelList.parentElement.scrollTop = 0;
 }
 
+/**
+ * Opens a series row. Episodes are ~11 KB per series, so they are fetched when
+ * first opened and then kept in memory for the session.
+ */
+async function openSeries(series) {
+  // loadChannels can spend up to ~97s downloading the M3U fallback after an
+  // Xtream panel fails, and it nulls xtreamCreds first. During that window the
+  // previous catalogue's series rows are still on screen and clickable, but
+  // there are no creds to build an episode url from — decline rather than
+  // handing toEpisodes a null creds object.
+  if (!state.xtreamCreds) {
+    showToast('Episodes unavailable right now — try again once channels finish loading');
+    return;
+  }
+
+  // render()'s search branch runs before the episodes branch, so a series
+  // opened from a search result would otherwise keep repainting the same
+  // search results underneath it — the view flips to 'episodes' but the
+  // still-truthy query swallows the navigation and nothing visibly happens.
+  state.searchQuery = '';
+  searchInput.value = '';
+
+  state.view = 'episodes';
+  state.activeSeries = series;
+  render();
+  channelList.parentElement.scrollTop = 0;
+
+  if (state.episodeCache.has(series.seriesId) || state.episodePending.has(series.seriesId)) return;
+
+  state.episodePending.add(series.seriesId);
+  try {
+    const m3uUrl = await api.storeGet('m3uUrl');
+    const info = await api.fetchSeriesInfo(m3uUrl, series.seriesId);
+    state.episodeCache.set(series.seriesId, toEpisodes(info, series.group, state.xtreamCreds));
+  } catch (err) {
+    console.warn('could not load episodes:', err.message);
+    // Don't cache the failure — a transient blip must not make the series look
+    // permanently empty. Dropping the key lets the next open retry.
+    state.episodeCache.delete(series.seriesId);
+    showToast('Could not load episodes for this series');
+    if (state.view === 'episodes' && state.activeSeries?.seriesId === series.seriesId) goBack();
+    return;
+  } finally {
+    state.episodePending.delete(series.seriesId);
+  }
+
+  // Only repaint if the user is still looking at this series.
+  if (state.view === 'episodes' && state.activeSeries?.seriesId === series.seriesId) render();
+}
+
 function goBack() {
+  // Episodes sit one level below a group, so back returns to that group first.
+  if (state.view === 'episodes') {
+    const group = state.activeSeries?.group ?? null;
+    state.view = group ? 'channels' : 'browse';
+    state.activeGroup = group;
+    state.activeSeries = null;
+    render();
+    return;
+  }
   state.view = 'browse';
   state.activeGroup = null;
   render();
@@ -835,11 +1130,11 @@ function timeRemaining(p) {
 }
 
 // --- Favorites ---
-function toggleFavorite(channelId) {
-  if (state.favorites.has(channelId)) {
-    state.favorites.delete(channelId);
+function toggleFavorite(channelUrl) {
+  if (state.favorites.has(channelUrl)) {
+    state.favorites.delete(channelUrl);
   } else {
-    state.favorites.add(channelId);
+    state.favorites.add(channelUrl);
   }
   api.storeSet('favorites', [...state.favorites]);
   if (state.activeFilter === 'favorites') render();
@@ -851,29 +1146,61 @@ saveBtn.addEventListener('click', async () => {
   const epgUrl = epgInput.value.trim();
   if (!m3uUrl) { alert('Please enter an M3U URL'); return; }
 
-  const oldM3u = (await api.storeGet('m3uUrl')) || '';
-  const oldEpg = (await api.storeGet('epgUrl')) || '';
+  const saved = await api.storeGetMany(['m3uUrl', 'epgUrl', 'useXtreamApi']);
+  const oldM3u = saved.m3uUrl || '';
+  const oldEpg = saved.epgUrl || '';
   const m3uChanged = m3uUrl !== oldM3u;
   const epgChanged = (epgUrl || '') !== oldEpg;
+  const apiChanged = fastApiCheck.checked !== (saved.useXtreamApi !== false);
 
   saveBtn.disabled = true;
   saveBtn.textContent = 'Loading…';
 
   try {
-    await api.storeSet('m3uUrl', m3uUrl);
-    await api.storeSet('epgUrl', epgUrl || null);
-    await api.storeSet('cacheTtlHours', Number(cacheTtlSelect.value));
     state.idleHideSeconds = clampIdleSeconds(idleHideSlider.value);
-    await api.storeSet('idleHideSeconds', state.idleHideSeconds);
+    const settings = {
+      m3uUrl,
+      epgUrl: epgUrl || null,
+      cacheTtlHours: Number(cacheTtlSelect.value),
+      idleHideSeconds: state.idleHideSeconds,
+      useXtreamApi: fastApiCheck.checked,
+    };
+    if (apiChanged) {
+      // Switching source invalidates the Xtream side the same way a url change
+      // does, or the next launch would read a cache the store no longer
+      // describes. playlistCachedAt is deliberately left alone: turning the API
+      // off should be able to reuse a still-valid M3U cache rather than forcing
+      // a full re-download the user did not ask for.
+      settings.playlistFormat = null;
+      settings.xtreamCachedAt = null;
+    }
+    if (m3uChanged) {
+      // The cached copy and its validators describe the old playlist. Keeping
+      // them would let the server answer 304 and serve the wrong channels.
+      settings.playlistEtag = null;
+      settings.playlistLastModified = null;
+      settings.playlistCachedAt = null;
+      // A stale 'xtream' here would let loadXtream serve xtream-cache.json —
+      // and the previous provider's stored username/password — for a url that
+      // now points somewhere else entirely.
+      settings.playlistFormat = null;
+    }
+    await api.storeSetMany(settings);
     // Snapshot the now-saved URLs so a reopen reflects "no change" correctly.
     savedM3uUrl = m3uUrl;
     savedEpgUrl = epgUrl || '';
+    savedFastApi = fastApiCheck.checked;
 
     showMain();
 
     if (state.channels.length === 0 || m3uChanged) {
       // First load, or the playlist URL changed → re-download.
       await loadChannels(m3uUrl, epgUrl || null, true);
+    } else if (apiChanged) {
+      // Source switched. Not a forced refresh: the Xtream cache was just
+      // invalidated above so that path refetches anyway, and the M3U path
+      // should still honour the user's re-download preference.
+      await loadChannels(m3uUrl, epgUrl || null, false);
     } else if (epgChanged) {
       // Only EPG changed → keep cached playlist, refetch EPG.
       await loadChannels(m3uUrl, epgUrl || null, false);
@@ -889,8 +1216,11 @@ saveBtn.addEventListener('click', async () => {
 
 cancelBtn.addEventListener('click', () => {
   // Restore the inputs to the saved values, discard edits, return to player.
-  api.storeGet('m3uUrl').then((v) => { m3uInput.value = v || ''; });
-  api.storeGet('epgUrl').then((v) => { epgInput.value = v || ''; });
+  api.storeGetMany(['m3uUrl', 'epgUrl', 'useXtreamApi']).then(({ m3uUrl, epgUrl, useXtreamApi }) => {
+    m3uInput.value = m3uUrl || '';
+    epgInput.value = epgUrl || '';
+    fastApiCheck.checked = useXtreamApi !== false;
+  });
   showMain();
 });
 
@@ -899,6 +1229,7 @@ settingsBtn.addEventListener('click', showSettings);
 // Keep the Save button label honest as the user edits the URLs.
 m3uInput.addEventListener('input', refreshSaveLabel);
 epgInput.addEventListener('input', refreshSaveLabel);
+fastApiCheck.addEventListener('change', refreshSaveLabel);
 
 idleHideSlider.addEventListener('input', () => {
   idleHideValue.textContent = formatIdleLabel(Number(idleHideSlider.value));
@@ -914,9 +1245,8 @@ function closeReloadModal() {
 
 async function doReload() {
   closeReloadModal();
-  const m3uUrl = await api.storeGet('m3uUrl');
+  const { m3uUrl, epgUrl } = await api.storeGetMany(['m3uUrl', 'epgUrl']);
   if (!m3uUrl) return;
-  const epgUrl = await api.storeGet('epgUrl');
   reloadBtn.classList.add('spinning');
   try {
     await loadChannels(m3uUrl, epgUrl || null, true);

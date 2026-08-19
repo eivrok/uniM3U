@@ -34,6 +34,13 @@
           <input type="range" id="idle-hide-slider" min="0" max="30" step="1" value="5" />
           <span id="idle-hide-value" class="settings-note">5s</span>
         </label>
+        <label class="settings-check">
+          <input type="checkbox" id="fast-api-check" checked />
+          <span>Use provider's fast API when available</span>
+        </label>
+        <p class="settings-note">Loads live TV, movies and series titles in seconds instead of
+          downloading the whole playlist. Turn off if your provider's API returns fewer channels
+          than expected, or if you need to search individual episodes.</p>
         <p class="settings-note" id="last-download-note"></p>
         <div class="settings-actions">
           <button id="cancel-settings-btn" class="btn-secondary hidden">Cancel</button>

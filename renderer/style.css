@@ -94,6 +94,24 @@ input:focus-visible,
 .settings-card input:focus,
 .settings-card select:focus { border-color: var(--accent); }
 
+/* Checkbox rows read as a control beside its label, not a stacked field, so
+   they opt out of the column layout and the full-width input box above. */
+.settings-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.settings-card .settings-check input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
 .settings-note {
   color: var(--text3);
   font-size: 12px;
@@ -310,6 +328,13 @@ input:focus-visible,
 }
 .fav-btn:hover { color: var(--favorite); }
 .fav-btn.active { color: var(--favorite); }
+
+.series-chevron {
+  color: var(--text3);
+  font-size: 20px;
+  padding: 0 12px;
+  flex-shrink: 0;
+}
 
 #loading-msg {
   padding: 24px;
