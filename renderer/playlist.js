@@ -38,34 +38,15 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
  * channels. Three progress updates still keep the counter visibly climbing.
  */
 export async function parseM3UProgressive(raw, onProgress, chunkSize = 10000) {
-  // TEMPORARY instrumentation — splits this phase into split / work / yield.
-  const t0 = performance.now();
-  const lines = splitLines(raw);
-  const tSplit = performance.now();
-  let yieldMs = 0;
-  let progressMs = 0;
-  let yields = 0;
-
   const channels = [];
-  for (const channel of channelsFromLines(lines)) {
+  for (const channel of channelsFromLines(splitLines(raw))) {
     channels.push(channel);
     if (channels.length % chunkSize === 0) {
-      const p0 = performance.now();
       onProgress?.(channels.length);
-      const p1 = performance.now();
       await tick();
-      progressMs += p1 - p0;
-      yieldMs += performance.now() - p1;
-      yields++;
     }
   }
   onProgress?.(channels.length);
-
-  const total = performance.now() - t0;
-  console.log(`[perf] parse total ${Math.round(total)}ms = splitLines ${Math.round(tSplit - t0)}ms`
-    + ` + onProgress ${Math.round(progressMs)}ms + yields ${Math.round(yieldMs)}ms over ${yields}`
-    + ` + work ${Math.round(total - (tSplit - t0) - progressMs - yieldMs)}ms`
-    + ` (${lines.length} lines, ${channels.length} channels)`);
   return channels;
 }
 

@@ -299,7 +299,7 @@ function showMain() {
  * still current. On a large playlist a 304 is the difference between a full
  * transfer and nothing at all. Returns the raw M3U text.
  */
-async function downloadPlaylist(m3uUrl, validators, lap) {
+async function downloadPlaylist(m3uUrl, validators) {
   loadingText.textContent = validators
     ? 'Checking for playlist updates…'
     : 'Downloading playlist, hang tight…';
@@ -313,7 +313,6 @@ async function downloadPlaylist(m3uUrl, validators, lap) {
   } finally {
     stopProgress();
   }
-  lap(validators ? 'revalidate (network + IPC in)' : 'download (network + IPC in)');
 
   if (result.notModified) {
     // A 304 without validators means the server is misbehaving; treat it as an
@@ -326,11 +325,10 @@ async function downloadPlaylist(m3uUrl, validators, lap) {
       // (a provider switch mid-flight), this is M3U content, and the store
       // must say so or the next launch serves stale xtream-cache.json.
       await api.storeSetMany({ playlistCachedAt: Date.now(), playlistFormat: 'm3u' });
-      lap('cache reuse (304)');
       return cached;
     }
     // Validators outlived the cache file. Ask again, unconditionally.
-    return downloadPlaylist(m3uUrl, null, lap);
+    return downloadPlaylist(m3uUrl, null);
   }
 
   await api.cacheWrite(result.body);
@@ -340,7 +338,6 @@ async function downloadPlaylist(m3uUrl, validators, lap) {
     playlistLastModified: result.lastModified,
     playlistFormat: 'm3u',
   });
-  lap('cache write (IPC out + fsync)');
   return result.body;
 }
 
@@ -377,7 +374,7 @@ async function migrateLegacyFavorites() {
  * still allows it. Throws when the panel cannot serve player_api.php, which is
  * the caller's signal to fall back to the M3U.
  */
-async function loadXtream(m3uUrl, forceRefresh, xtreamCachedAt, ttlH, lap) {
+async function loadXtream(m3uUrl, forceRefresh, xtreamCachedAt, ttlH) {
   const format = await api.storeGet('playlistFormat');
   // playlistFormat is cleared to null whenever the saved url changes (see the
   // settings Save handler), so a stale value here can only mean "still the
@@ -388,7 +385,6 @@ async function loadXtream(m3uUrl, forceRefresh, xtreamCachedAt, ttlH, lap) {
     const cached = await api.xtreamCacheRead();
     if (cached) {
       const payloads = JSON.parse(cached);
-      lap('xtream cache read');
       return asCatalogue(payloads);
     }
   }
@@ -396,14 +392,12 @@ async function loadXtream(m3uUrl, forceRefresh, xtreamCachedAt, ttlH, lap) {
   loadingText.textContent = 'Loading catalogue…';
   const payloads = await api.fetchXtream(m3uUrl);
   if (!payloads) return null; // ordinary M3U url — caller uses the M3U path
-  lap('xtream fetch (network + IPC in)');
 
   await api.xtreamCacheWrite(JSON.stringify(payloads));
   // Its own clock (#5): playlistCachedAt belongs to the M3U cache file, which
   // this write never touches. Sharing the key would make a stale
   // playlist-cache.m3u look freshly downloaded on every Xtream refetch.
   await api.storeSetMany({ xtreamCachedAt: Date.now(), playlistFormat: 'xtream' });
-  lap('xtream cache write');
 
   return asCatalogue(payloads);
 }
@@ -426,16 +420,6 @@ async function loadChannels(m3uUrl, epgUrl, forceRefresh = false) {
   emptyStateText.classList.add('pulsing');
   channelList.innerHTML = '';
 
-  // TEMPORARY perf instrumentation — strip once the refresh bottleneck is found.
-  const perfLaps = [];
-  const perfStart = performance.now();
-  let perfLast = perfStart;
-  const lap = (phase) => {
-    const now = performance.now();
-    perfLaps.push({ phase, ms: Math.round(now - perfLast) });
-    perfLast = now;
-  };
-
   try {
     const {
       playlistCachedAt: cachedAt,
@@ -449,7 +433,6 @@ async function loadChannels(m3uUrl, epgUrl, forceRefresh = false) {
       'playlistCachedAt', 'xtreamCachedAt', 'cacheTtlHours', 'lastChannelUrl',
       'playlistEtag', 'playlistLastModified', 'useXtreamApi',
     ]);
-    lap('settings read');
 
     let raw = null;
 
@@ -463,7 +446,7 @@ async function loadChannels(m3uUrl, epgUrl, forceRefresh = false) {
     try {
       const parsed = useXtreamApi === false
         ? null
-        : await loadXtream(m3uUrl, forceRefresh, xtreamCachedAt, ttlH, lap);
+        : await loadXtream(m3uUrl, forceRefresh, xtreamCachedAt, ttlH);
       if (parsed) {
         state.channels = parsed.channels;
         state.xtreamCreds = parsed.creds;
@@ -483,7 +466,6 @@ async function loadChannels(m3uUrl, epgUrl, forceRefresh = false) {
       raw = !forceRefresh && isCacheFresh(cachedAt, ttlH)
         ? await api.cacheRead()
         : null;
-      lap('cache read (file + IPC in)');
 
       if (!raw) {
         // Revalidate rather than re-download, but only when there is a cached
@@ -491,7 +473,7 @@ async function loadChannels(m3uUrl, epgUrl, forceRefresh = false) {
         const validators = cachedAt && (playlistEtag || playlistLastModified)
           ? { etag: playlistEtag, lastModified: playlistLastModified }
           : null;
-        raw = await downloadPlaylist(m3uUrl, validators, lap);
+        raw = await downloadPlaylist(m3uUrl, validators);
       }
     }
 
@@ -500,9 +482,7 @@ async function loadChannels(m3uUrl, epgUrl, forceRefresh = false) {
       const parsed = await parseM3UProgressive(raw, (n) => {
         loadingText.textContent = `Parsing channels… ${n.toLocaleString()} so far…`;
       });
-      lap('parse');
       state.channels = parsed.filter((c) => c.url && !/^=+/.test(c.name.trim()));
-      lap('filter');
     }
     loadingText.textContent = `Loaded ${state.channels.length.toLocaleString()} channels`;
 
@@ -533,7 +513,6 @@ async function loadChannels(m3uUrl, epgUrl, forceRefresh = false) {
     // at the old host with the old credentials.
     state.episodeCache.clear();
     state.episodePending.clear();
-    lap('precompute country/sub');
 
     // Load EPG in background
     if (epgUrl) {
@@ -546,9 +525,6 @@ async function loadChannels(m3uUrl, epgUrl, forceRefresh = false) {
     state.view = 'browse';
     state.activeGroup = null;
     render();
-    lap('first render (browse)');
-    console.table(perfLaps);
-    console.log(`[perf] loadChannels total: ${Math.round(performance.now() - perfStart)} ms for ${state.channels.length} channels`);
 
     // Resume the last-played channel, matched by stable url (not the index id).
     // Drill into its group so the row is visible and highlighted.

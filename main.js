@@ -260,14 +260,7 @@ function fetchFollowRedirects(url, maxRedirects, onProgress, validators) {
       body.on('data', (chunk) => { chunks.push(chunk); });
       body.on('end', () => {
         onProgress?.(received, total);
-        // TEMPORARY instrumentation — shows whether the remaining cost is the
-        // wire or the buffer-to-string conversion. Strip with the renderer's.
-        const tTransfer = Date.now();
         const text = Buffer.concat(chunks).toString('utf8');
-        console.log(`[perf] fetch ${tTransfer - tStart}ms transfer`
-          + ` (${(received / 1048576).toFixed(1)} MB wire, encoding=${encoding || 'identity'})`
-          + ` + ${Date.now() - tTransfer}ms decode to ${(text.length / 1048576).toFixed(1)} MB string`
-          + ` [etag=${res.headers.etag || 'none'}, last-modified=${res.headers['last-modified'] || 'none'}]`);
         resolve({
           body: text,
           etag: res.headers.etag || null,
