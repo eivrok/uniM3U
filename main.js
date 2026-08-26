@@ -10,10 +10,30 @@ const { autoUpdater } = require('electron-updater');
 const { shouldAutoUpdate } = require('./updater-policy');
 const { conditionalHeaders } = require('./http-cache-policy');
 const { isXtreamUrl, xtreamCreds, xtreamApiUrl } = require('./xtream-url');
+const { openStore } = require('./store-recovery');
 
-const store = new Store({
-  encryptionKey: 'iptv-player-key',
+// Computed rather than read off the store, because the case this handles is
+// the store failing to exist at all. config.json is conf's default name.
+function configFilePath() {
+  return path.join(app.getPath('userData'), 'config.json');
+}
+
+// Kept, not deleted. The file still holds the user's settings and a later
+// version may manage to read it.
+function quarantineConfigFile() {
+  const kept = path.join(app.getPath('userData'), `config.unreadable-${Date.now()}.json`);
+  fs.renameSync(configFilePath(), kept);
+  return kept;
+}
+
+const { store, recovered: settingsWereReset, backupPath: unreadableConfigPath } = openStore({
+  createStore: () => new Store({ encryptionKey: 'iptv-player-key' }),
+  quarantineConfig: quarantineConfigFile,
 });
+
+if (settingsWereReset) {
+  console.error(`settings could not be read and were reset; previous file kept at ${unreadableConfigPath}`);
+}
 
 let mainWindow;
 
