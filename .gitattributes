@@ -1,0 +1,5 @@
+# Vendored player bundles are copied byte-for-byte out of node_modules by
+# sync-player-libs.js and compared by hash in player-libs.test.js. Line-ending
+# conversion on checkout would rewrite the committed copies and break that
+# comparison on Windows, where core.autocrlf is usually on.
+renderer/lib/** -text

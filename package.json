@@ -5,10 +5,16 @@
   "license": "MIT",
   "main": "main.js",
   "scripts": {
+    "sync:libs": "node sync-player-libs.js",
+    "prestart": "npm run sync:libs",
     "start": "electron .",
+    "prebuild": "npm run sync:libs",
     "build": "electron-builder",
+    "prebuild:mac": "npm run sync:libs",
     "build:mac": "electron-builder --mac",
+    "prebuild:win": "npm run sync:libs",
     "build:win": "electron-builder --win",
+    "prebuild:linux": "npm run sync:libs",
     "build:linux": "electron-builder --linux",
     "test": "vitest run",
     "test:watch": "vitest"
