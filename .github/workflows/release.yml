@@ -15,7 +15,7 @@ jobs:
   create-release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Create draft release if absent
         run: |
@@ -58,7 +58,7 @@ jobs:
     needs: release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # A green build is not proof the upload landed: v1.4.0 published with only
       # the mac assets while every job reported success, which left
