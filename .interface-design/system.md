@@ -31,16 +31,20 @@ Text (primary → tertiary):
 Accent:
   --accent  #e50914  the ONE chromatic color — active states, primary CTA, focus
   --accent2 #ff6b6b  light-red, hover emphasis only (e.g. back-header)
+
+Other:
+  --border-hover  #555                    hover edge
+  --favorite      #f0c040                 gold star (semantic, off-palette by intent)
+  --row-active    rgba(255,255,255,0.06)  selected list row lift
 ```
 
-### Tokens to ADD (currently hardcoded strays — fix on next CSS pass)
-```
---border-hover  #555      repeated ×3 as a raw value on hover
---favorite      #f0c040   gold star (semantic, off-palette by intent)
-```
-### Color fixes
-- Toast uses `#c0392b` — a *different* red than `--accent`. Switch toast to `--accent`.
-- Button text `#fff` is fine (on accent fill).
+The accent is a **marker, not a fill**, in lists: a selected row is a neutral
+lift plus a 3px accent left bar. The old `--accent-tint` red slab is gone — 20
+rows of tinted red competed with the video for attention.
+
+Native form/media widgets (`<video controls>`, `input[type=range]`, focus rings)
+paint in the OS accent, not ours. Style or replace them — a stray blue slider or
+yellow focus ring is the same bug as hardcoding an off-palette hex.
 
 ## Depth — borders-only (locked)
 
@@ -55,6 +59,7 @@ Do **not** introduce shadows.
 
 ```
 Scale: 4 · 8 · 12 · 16 · 20 · 24 · 32
+Sidebar: --sidebar-w 340px
 ```
 Snap to the grid. Existing off-grid values to migrate when touched: `5, 6, 10, 11`
 (10px gaps and 11px row padding are the common offenders). `28px` sidebar top is a
@@ -103,8 +108,15 @@ Icon button     transparent · no border · --text3 → --text on hover · ~4px 
 Tab (filter)    pill · 4×12 · 12px · 1px --border · active = --accent fill
 Count pill      pill · 2×8 · 10px · --bg3 (transparent when .small)
 Card / modal    --bg2 · 1px --border · --radius-lg · pad 20 · gap 12–20
-List row        pad 8–12 × 12 · 1px rgba bottom divider · --bg3 hover
-  active        bg accent-tint rgba(229,9,20,0.15) · 3px --accent left border
+Icon button     28×28 · --radius · --text3 → --text on --bg3 hover
+List row        pad 8–12 × 12 · 1px rgba bottom divider · --bg3 hover · min-h 56
+  active        bg --row-active · 3px --accent left border · name → 600
+  leading       44px tabular time column (date 10px --text3 over time 13px/600)
+  title         2-line clamp, never a single-line ellipsis
+  fav star      opacity 0 until row hover / kbd-focus / favourited
+Transport bar   absolute bottom of the player · scrim gradient to rgba(0,0,0,0.85)
+                pad 32/20/16 · 36px icon buttons · volume slider expands on hover
+                fades on the same timer as the now-playing overlay
 Input           --bg3 · 1px --border · --radius · 13px · focus border --accent
 Spinner         44px · 3px ring · --accent top · spin 0.8s
 ```
@@ -115,4 +127,6 @@ Do: use CSS variables; borders for separation; one accent; snap to 4px grid; two
 motion speeds; weights 500/600/700 only.
 
 Don't: add box-shadows; introduce a second chromatic color; hardcode hex when a token
-exists; use a third red (toast); invent new radius/spacing values off the scales.
+exists; use a third red (toast); invent new radius/spacing values off the scales;
+ship a native browser widget unstyled; print the same string twice on screen
+(the category header, the row subtitle, and the player overlay each say it once).
