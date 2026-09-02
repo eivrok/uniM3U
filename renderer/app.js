@@ -6,6 +6,7 @@ import { formatDownloadProgress } from './format.js';
 import { loadEPG, getProgramsForChannel, getCurrentProgram, getNextProgram } from './epg.js';
 import { Player } from './player.js';
 import { clampIdleSeconds, formatIdleLabel, decideChrome } from './idle.js';
+import { parseChannelLabel } from './channel-label.js';
 
 const api = window.api;
 
@@ -113,6 +114,68 @@ videoEl.addEventListener('playing', hideSpinner);
 videoEl.addEventListener('waiting', () => playerLoading.classList.remove('hidden'));
 videoEl.addEventListener('error', hideSpinner);
 
+// --- Transport bar ---
+// Our own controls instead of <video controls>: the native bar brought an
+// unstyled focus ring, a browser kebab menu we don't own, and no way to place
+// play and volume next to each other.
+const playerArea = document.getElementById('player-area');
+const playerControls = document.getElementById('player-controls');
+const pcPlay = document.getElementById('pc-play');
+const pcMute = document.getElementById('pc-mute');
+const pcVolume = document.getElementById('pc-volume-slider');
+const pcProgramme = document.getElementById('pc-programme');
+const pcClock = document.getElementById('pc-clock');
+const pcFullscreen = document.getElementById('pc-fullscreen');
+
+function togglePlay() {
+  if (videoEl.paused) {
+    videoEl.play().catch((err) => console.error('play failed:', err));
+  } else {
+    videoEl.pause();
+  }
+}
+
+function toggleMute() {
+  videoEl.muted = !videoEl.muted;
+}
+
+function toggleFullscreen() {
+  if (document.fullscreenElement) {
+    document.exitFullscreen().catch((err) => console.error('exit fullscreen failed:', err));
+  } else {
+    playerArea.requestFullscreen().catch((err) => console.error('fullscreen failed:', err));
+  }
+}
+
+// The icon follows the element, not the click: a stream that stalls or a
+// buffer that ends changes playback without going through the button.
+videoEl.addEventListener('play', () => pcPlay.classList.add('playing'));
+videoEl.addEventListener('pause', () => pcPlay.classList.remove('playing'));
+
+videoEl.addEventListener('volumechange', () => {
+  pcMute.classList.toggle('muted', videoEl.muted || videoEl.volume === 0);
+  pcVolume.value = String(videoEl.muted ? 0 : videoEl.volume);
+});
+
+pcPlay.addEventListener('click', togglePlay);
+pcMute.addEventListener('click', toggleMute);
+pcFullscreen.addEventListener('click', toggleFullscreen);
+
+pcVolume.addEventListener('input', () => {
+  videoEl.volume = Number(pcVolume.value);
+  videoEl.muted = videoEl.volume === 0;
+});
+
+document.addEventListener('fullscreenchange', () => {
+  pcFullscreen.classList.toggle('active', Boolean(document.fullscreenElement));
+});
+
+function updateClock() {
+  pcClock.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+updateClock();
+setInterval(updateClock, 15_000);
+
 // --- Idle controller: reveal chrome on input, enter immersive after idle ---
 // Folds in the old now-playing-overlay fade. A single ticking check uses the
 // pure shouldHideChrome() so the timing rule stays testable in idle.test.js.
@@ -135,6 +198,7 @@ function applyIdleState() {
   });
   mainScreen.classList.toggle('immersive', immersive);
   playerOverlay.classList.toggle('show', overlay);
+  playerControls.classList.toggle('show', overlay);
 
   // Snap the window to the video aspect on the way into immersive, restore it
   // on the way out. Only act on the transition, not every 500ms tick.
@@ -608,14 +672,14 @@ function render() {
     const results = state.channels.filter(
       (c) => isCountryVisible(c.country) && c.name.toLowerCase().includes(q)
     );
-    renderChannelItems(results, 'No channels match your search');
+    renderChannelItems(results, 'No channels match your search', false, { showSource: true });
     return;
   }
 
   // Favorites: flat list, shown regardless of country whitelist.
   if (state.activeFilter === 'favorites') {
     const favs = state.channels.filter((c) => c.url && state.favorites.has(c.url));
-    renderChannelItems(favs, 'No favorites yet — tap ★ on a channel');
+    renderChannelItems(favs, 'No favorites yet — tap ★ on a channel', false, { showSource: true });
     return;
   }
 
@@ -718,7 +782,7 @@ function renderBackHeader(group) {
   channelList.appendChild(header);
 }
 
-function renderChannelItems(list, emptyMsg, append = false) {
+function renderChannelItems(list, emptyMsg, append = false, opts = {}) {
   if (!append) channelList.innerHTML = '';
   cleanupListObserver();
 
@@ -737,7 +801,7 @@ function renderChannelItems(list, emptyMsg, append = false) {
   function appendBatch() {
     const batch = list.slice(rendered, rendered + CHUNK_SIZE);
     const frag = document.createDocumentFragment();
-    batch.forEach((c) => frag.appendChild(buildChannelItem(c, state.epgData)));
+    batch.forEach((c) => frag.appendChild(buildChannelItem(c, state.epgData, opts)));
     channelList.insertBefore(frag, sentinel); // sentinel stays at the bottom
     rendered += batch.length;
     if (rendered >= list.length) cleanupListObserver();
@@ -771,7 +835,7 @@ function renderHint(msg) {
   channelList.appendChild(hint);
 }
 
-function buildChannelItem(channel, epgData) {
+function buildChannelItem(channel, epgData, { showSource = false } = {}) {
   const item = document.createElement('div');
   item.className = 'channel-item';
   if (channel.id === state.activeChannelId) item.classList.add('active');
@@ -801,21 +865,37 @@ function buildChannelItem(channel, epgData) {
     item.appendChild(logoPlaceholder());
   }
 
-  // Info
+  // Name — the provider tag and event timestamp are the same on every row in a
+  // category, so they move out of the title and into their own slots. What's
+  // left is the part that actually distinguishes one row from the next.
+  const label = parseChannelLabel(channel.name);
+
+  if (label.time || label.date) {
+    const timeEl = document.createElement('div');
+    timeEl.className = 'channel-time';
+    if (label.date) timeEl.appendChild(el('div', 'channel-date', label.date));
+    if (label.time) timeEl.appendChild(el('div', 'channel-clock', label.time));
+    item.appendChild(timeEl);
+  }
+
   const info = document.createElement('div');
   info.className = 'channel-info';
 
   const nameEl = document.createElement('div');
   nameEl.className = 'channel-name';
-  nameEl.textContent = channel.name;
+  nameEl.textContent = label.title;
   info.appendChild(nameEl);
 
+  // Second line: what's on now. Falling back to the provider tag would just
+  // reprint the category header on every row — it only earns the space in the
+  // flat lists (search, favourites) that have no category around them.
   const prog = getCurrentProgram(epgData, channel.tvgId || channel.name);
-  if (prog) {
-    const epgEl = document.createElement('div');
-    epgEl.className = 'channel-epg-now';
-    epgEl.textContent = prog.title;
-    info.appendChild(epgEl);
+  const subtitle = prog ? prog.title : (showSource ? label.tag : null);
+  if (subtitle) {
+    const subEl = document.createElement('div');
+    subEl.className = prog ? 'channel-sub channel-epg-now' : 'channel-sub';
+    subEl.textContent = subtitle;
+    info.appendChild(subEl);
   }
 
   item.appendChild(info);
@@ -1006,7 +1086,8 @@ function playChannel(channel) {
 
   emptyState.style.display = 'none';
   nowPlayingInfo.classList.remove('hidden');
-  channelNameEl.textContent = channel.name;
+  playerControls.classList.remove('hidden');
+  channelNameEl.textContent = parseChannelLabel(channel.name).title;
   revealChrome();
   startIdleLoop();
 
@@ -1024,6 +1105,7 @@ function updateEPGOverlay(channel) {
 
   epgNowEl.textContent = now ? now.title : '';
   epgNextEl.textContent = next ? `Up next: ${next.title} · ${formatTime(next.start)}` : '';
+  pcProgramme.textContent = now ? now.title : '';
 
   epgBar.innerHTML = '';
   if (!now && !next) {
@@ -1288,6 +1370,25 @@ document.addEventListener('keydown', (e) => {
       e.preventDefault();
       rows[kbdIndex].click();
     }
+  }
+});
+
+// Playback shortcuts. Space/M/F only while the main screen is interactive and
+// the user isn't typing — Space in the search box must stay a space.
+document.addEventListener('keydown', (e) => {
+  if (!settingsScreen.classList.contains('hidden')) return;
+  if (!reloadModal.classList.contains('hidden') || !countriesModal.classList.contains('hidden')) return;
+  const ae = document.activeElement;
+  if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'SELECT' || ae.tagName === 'TEXTAREA')) return;
+  if (!state.activeChannelId) return;
+
+  if (e.key === ' ') {
+    e.preventDefault();
+    togglePlay();
+  } else if (e.key === 'm' || e.key === 'M') {
+    toggleMute();
+  } else if (e.key === 'f' || e.key === 'F') {
+    toggleFullscreen();
   }
 });
 

@@ -12,8 +12,10 @@
   --text3: #666;
   --border-hover: #555;
   --favorite: #f0c040;
-  --accent-tint: rgba(229, 9, 20, 0.15);
-  --sidebar-w: 300px;
+  /* Selection is a neutral lift + accent bar, not a red slab: the accent
+     stays a 3px marker so 20 rows of list don't compete with the video. */
+  --row-active: rgba(255, 255, 255, 0.06);
+  --sidebar-w: 340px;
   --radius-sm: 4px;
   --radius: 6px;
   --radius-lg: 12px;
@@ -53,7 +55,11 @@ input:focus-visible,
   align-items: center;
   justify-content: center;
   background: var(--bg);
+  /* Frameless window: setup is a full-screen view with no sidebar header, so
+     the empty ground around the card is the drag handle. */
+  -webkit-app-region: drag;
 }
+.settings-card { -webkit-app-region: no-drag; }
 
 .settings-card {
   background: var(--bg2);
@@ -95,11 +101,12 @@ input:focus-visible,
 .settings-card select:focus { border-color: var(--accent); }
 
 /* Checkbox rows read as a control beside its label, not a stacked field, so
-   they opt out of the column layout and the full-width input box above. */
-.settings-check {
+   they opt out of the column layout and the full-width input box above.
+   Scoped to .settings-card so it outweighs the `.settings-card label` column. */
+.settings-card .settings-check {
   flex-direction: row;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   cursor: pointer;
 }
 
@@ -172,7 +179,10 @@ input:focus-visible,
   align-items: center;
   justify-content: space-between;
   padding: 8px 16px 12px;
+  /* Frameless window — this strip is the drag handle, its buttons are not. */
+  -webkit-app-region: drag;
 }
+#sidebar-header button { -webkit-app-region: no-drag; }
 
 #brand { display: flex; align-items: center; min-width: 0; }
 
@@ -187,16 +197,31 @@ input:focus-visible,
 #brand { flex-shrink: 1; overflow: hidden; }
 .header-actions { flex-shrink: 0; }
 
-#settings-btn {
-  background: none;
+/* Helper text sits inside a <label>, whose uppercase transform is meant for the
+   field name only — without this the idle value reads "5S". */
+.settings-card .settings-note { text-transform: none; letter-spacing: normal; }
+
+/* Range inputs — the native control renders in the OS accent (bright blue on
+   Windows), the same class of stray browser widget as the old <video controls>. */
+.settings-card input[type="range"] {
+  appearance: none;
+  padding: 0;
+  height: 4px;
+  background: var(--bg3);
   border: none;
-  color: var(--text3);
+  border-radius: var(--radius-pill);
   cursor: pointer;
-  font-size: 18px;
-  padding: 2px 4px;
-  transition: color var(--t-fast);
 }
-#settings-btn:hover { color: var(--text); }
+.settings-card input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+}
+
+/* One icon-button rule for the header trio — see .icon-btn below. */
 
 #search-bar {
   padding: 0 12px 8px;
@@ -255,7 +280,7 @@ input:focus-visible,
 .channel-item {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
   /* 3px transparent bar reserved on every row so the active state colors it
      in place instead of shoving content 3px right on select. */
   padding: 8px 12px 8px 9px;
@@ -263,10 +288,11 @@ input:focus-visible,
   cursor: pointer;
   border-bottom: 1px solid rgba(255,255,255,0.03);
   transition: background var(--t-fast), border-color var(--t-fast);
-  min-height: 52px;
+  min-height: 56px;
 }
 .channel-item:hover { background: var(--bg3); }
-.channel-item.active { background: var(--accent-tint); border-left-color: var(--accent); }
+.channel-item.active { background: var(--row-active); border-left-color: var(--accent); }
+.channel-item.active .channel-name { color: var(--text); font-weight: 600; }
 
 /* Keyboard-focused row (Up/Down nav) — inset outline, no layout shift */
 .kbd-focus {
@@ -297,35 +323,60 @@ input:focus-visible,
   color: var(--text3);
 }
 
-.channel-info { flex: 1; overflow: hidden; }
+/* Event rows carry a start time; plain channel rows don't. The column is only
+   laid out when a time exists, so ordinary lists don't pay 40px of dead gutter,
+   while an all-events category lines its times up. */
+.channel-time {
+  flex-shrink: 0;
+  width: 44px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+}
+.channel-date { font-size: 10px; color: var(--text3); }
+.channel-clock { font-size: 13px; font-weight: 600; color: var(--text2); }
 
+.channel-info { flex: 1; min-width: 0; }
+
+/* Two lines rather than an ellipsis: in an events category almost every title
+   overflows one line, and a list where most rows end in "…" is unreadable. */
 .channel-name {
   font-size: 13px;
   font-weight: 500;
-  white-space: nowrap;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 
-.channel-epg-now {
+.channel-sub {
   font-size: 11px;
-  color: var(--text2);
+  color: var(--text3);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   margin-top: 2px;
 }
+.channel-epg-now { color: var(--text2); }
 
+/* At rest a star per row is 20 identical grey dots of noise. It appears on
+   hover, on keyboard focus, and permanently once the channel is a favourite. */
 .fav-btn {
   background: none;
   border: none;
   color: var(--text3);
   cursor: pointer;
   font-size: 14px;
-  padding: 2px;
+  padding: 4px;
   flex-shrink: 0;
-  transition: color var(--t-fast);
+  opacity: 0;
+  transition: color var(--t-fast), opacity var(--t-fast);
 }
+.channel-item:hover .fav-btn,
+.channel-item.kbd-focus .fav-btn,
+.fav-btn:focus-visible,
+.fav-btn.active { opacity: 1; }
 .fav-btn:hover { color: var(--favorite); }
 .fav-btn.active { color: var(--favorite); }
 
@@ -376,6 +427,18 @@ input:focus-visible,
   background: #000;
 }
 
+/* Drag handle over the top of the video. Sits under the now-playing overlay
+   (which is pointer-events:none) and under the transport bar. */
+#player-drag {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 40px;
+  z-index: 4;
+  -webkit-app-region: drag;
+}
+
 #video-player {
   width: 100%;
   height: 100%;
@@ -383,12 +446,110 @@ input:focus-visible,
   display: block;
 }
 
-/* Live stream — hide the native seek bar + timecode (they jitter as the live
-   buffer grows). Keep play/volume/fullscreen. */
-#video-player::-webkit-media-controls-timeline,
-#video-player::-webkit-media-controls-current-time-display,
-#video-player::-webkit-media-controls-time-remaining-display {
-  display: none;
+/* ---- Transport bar ----
+   Replaces <video controls>. A live stream has no timeline worth showing, so
+   the bar carries transport + volume on the left, what's playing in the middle,
+   wall clock and fullscreen on the right — instead of two clusters pinned to
+   opposite edges with 1400px of nothing between them. */
+#player-controls {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 32px 20px 16px;
+  /* Scrim: the bar sits on letterboxed black or on picture; either way its
+     icons need their own ground. */
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.85));
+  opacity: 0;
+  transition: opacity var(--t-slow);
+  pointer-events: none;
+  z-index: 6;
+}
+#player-controls.show { opacity: 1; pointer-events: auto; }
+
+.pc-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  border-radius: var(--radius);
+  color: var(--text2);
+  cursor: pointer;
+  transition: color var(--t-fast), background var(--t-fast);
+}
+.pc-btn:hover { color: #fff; background: rgba(255, 255, 255, 0.1); }
+
+.pc-icon { width: 22px; height: 22px; fill: currentColor; }
+
+/* Each button holds both states as sibling SVGs; the class picks one. */
+.pc-icon-pause,
+#pc-play.playing .pc-icon-play { display: none; }
+#pc-play.playing .pc-icon-pause { display: block; }
+
+.pc-icon-muted,
+#pc-mute.muted .pc-icon-sound { display: none; }
+#pc-mute.muted .pc-icon-muted { display: block; }
+
+.pc-icon-exit-fs,
+#pc-fullscreen.active .pc-icon-enter-fs { display: none; }
+#pc-fullscreen.active .pc-icon-exit-fs { display: block; }
+
+/* The slider stays collapsed until the volume group is touched, so the bar
+   reads as icons at rest. */
+.pc-volume { display: flex; align-items: center; }
+
+.pc-slider {
+  width: 0;
+  opacity: 0;
+  height: 4px;
+  margin-left: 0;
+  appearance: none;
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  outline: none;
+  transition: width var(--t-fast), opacity var(--t-fast), margin var(--t-fast);
+}
+.pc-volume:hover .pc-slider,
+.pc-slider:focus-visible { width: 80px; opacity: 1; margin-left: 8px; }
+
+.pc-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  cursor: pointer;
+}
+
+.pc-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pc-programme {
+  font-size: 13px;
+  color: var(--text2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pc-clock {
+  flex-shrink: 0;
+  font-size: 13px;
+  color: var(--text2);
+  font-variant-numeric: tabular-nums;
 }
 
 #player-overlay {
@@ -587,20 +748,25 @@ input:focus-visible,
 #toast.show { opacity: 1; }
 
 /* ---- Sidebar header actions ---- */
-.header-actions { display: flex; align-items: center; gap: 4px; }
-#countries-btn,
-#reload-btn {
+.header-actions { display: flex; align-items: center; gap: 2px; }
+
+.icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
   background: none;
   border: none;
+  border-radius: var(--radius);
   color: var(--text3);
   cursor: pointer;
   font-size: 15px;
-  padding: 2px 4px;
-  transition: color var(--t-fast);
+  line-height: 1;
+  transition: color var(--t-fast), background var(--t-fast);
 }
-#countries-btn:hover,
-#reload-btn:hover { color: var(--text); }
-#reload-btn.spinning { display: inline-block; animation: spin 0.8s linear infinite; }
+.icon-btn:hover { color: var(--text); background: var(--bg3); }
+#reload-btn.spinning { animation: spin 0.8s linear infinite; }
 
 /* Confirm dialog (reload) */
 .modal-confirm { width: 340px; gap: 16px; }
@@ -782,10 +948,11 @@ input:focus-visible,
 /* ---- App version footer ---- */
 #app-version {
   flex-shrink: 0;
-  padding: 8px 12px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
   font-size: 11px;
-  text-align: left;
-  color: var(--text2);
+  color: var(--text3);
+  font-variant-numeric: tabular-nums;
 }
 
 /* --- Immersive idle mode: chrome hidden, video fills window --- */
@@ -793,6 +960,4 @@ input:focus-visible,
 #main-screen.immersive #epg-bar { display: none; }
 #main-screen.immersive #player-overlay { opacity: 0; pointer-events: none; }
 #main-screen.immersive #player-area { cursor: none; }
-/* Chromium-only: hide the native <video> controls without touching the
-   controls attribute, so revealing chrome restores them instantly. */
-#main-screen.immersive video::-webkit-media-controls-enclosure { display: none !important; }
+#main-screen.immersive #player-controls { opacity: 0; pointer-events: none; }

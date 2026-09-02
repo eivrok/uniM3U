@@ -59,9 +59,9 @@
             <span id="brand-text" class="app-title">UniM3U</span>
           </div>
           <div class="header-actions">
-            <button id="countries-btn" title="Choose countries">🌐&#xFE0E;</button>
-            <button id="reload-btn" title="Reload playlist">↻</button>
-            <button id="settings-btn" title="Settings">⚙</button>
+            <button id="countries-btn" class="icon-btn" title="Choose countries" aria-label="Choose countries">🌐&#xFE0E;</button>
+            <button id="reload-btn" class="icon-btn" title="Reload playlist" aria-label="Reload playlist">↻</button>
+            <button id="settings-btn" class="icon-btn" title="Settings" aria-label="Settings">⚙</button>
           </div>
         </div>
 
@@ -87,7 +87,11 @@
       <!-- Player area -->
       <main id="player-area">
         <div id="player-wrapper">
-          <video id="video-player" controls></video>
+          <!-- Frameless window: without a native caption bar the only way to
+               move the window is a drag region, and the sidebar header alone is
+               a small target. -->
+          <div id="player-drag"></div>
+          <video id="video-player" playsinline></video>
           <div id="player-loading" class="hidden"><div class="spinner"></div></div>
           <div id="player-overlay">
             <div id="now-playing-info" class="hidden">
@@ -98,6 +102,38 @@
               <div id="epg-now"></div>
               <div id="epg-next"></div>
             </div>
+          </div>
+
+          <!-- Custom transport. The native <video controls> bar was a stray
+               browser widget: unstyled focus rings, its own kebab menu, and
+               play/volume flung to opposite window edges. -->
+          <div id="player-controls" class="hidden">
+            <button id="pc-play" class="pc-btn" title="Play / pause (Space)" aria-label="Play / pause">
+              <svg class="pc-icon pc-icon-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.14v13.72L19 12z"/></svg>
+              <svg class="pc-icon pc-icon-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 5h3.5v14H6.5zM14 5h3.5v14H14z"/></svg>
+            </button>
+
+            <div id="pc-volume" class="pc-volume">
+              <button id="pc-mute" class="pc-btn" title="Mute (M)" aria-label="Mute">
+                <svg class="pc-icon pc-icon-sound" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.2L12 5.4v13.2L7.2 14.5H4z"/><path d="M15.4 8.6a4.6 4.6 0 0 1 0 6.8M18 6a8.2 8.2 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+                <svg class="pc-icon pc-icon-muted" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.2L12 5.4v13.2L7.2 14.5H4z"/><path d="M16 9.5l4.5 5M20.5 9.5l-4.5 5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+              </button>
+              <input type="range" id="pc-volume-slider" class="pc-slider" min="0" max="1" step="0.01" value="1" aria-label="Volume" />
+            </div>
+
+            <!-- The channel name and LIVE badge already sit in the overlay at
+                 the top of the picture, and both fade on the same timer, so the
+                 bar carries what's on now rather than a second copy. -->
+            <div class="pc-meta">
+              <span id="pc-programme" class="pc-programme"></span>
+            </div>
+
+            <span id="pc-clock" class="pc-clock"></span>
+
+            <button id="pc-fullscreen" class="pc-btn" title="Fullscreen (F)" aria-label="Fullscreen">
+              <svg class="pc-icon pc-icon-enter-fs" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+              <svg class="pc-icon pc-icon-exit-fs" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>
+            </button>
           </div>
         </div>
         <div id="epg-bar" class="hidden"></div>

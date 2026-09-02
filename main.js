@@ -69,7 +69,16 @@ function createWindow() {
     height: 900,
     minWidth: 900,
     minHeight: 600,
-    titleBarStyle: 'hiddenInset',
+    // One title bar, not two: the app already draws "UniM3U" in the sidebar
+    // header, so the native caption bar was a second copy of the same title.
+    // 'hiddenInset' is macOS-only, which is why Windows kept showing its frame.
+    titleBarStyle: 'hidden',
+    // Windows/Linux have no traffic lights, so the caption buttons are drawn as
+    // an overlay over the (black) top-right of the player area. Without this the
+    // frameless window would have no minimise/maximise/close at all.
+    ...(process.platform === 'darwin'
+      ? { trafficLightPosition: { x: 16, y: 18 } }
+      : { titleBarOverlay: { color: '#000000', symbolColor: '#aaaaaa', height: 40 } }),
     autoHideMenuBar: true, // hide the Win/Linux menu bar (Alt reveals); macOS uses the system menu
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
