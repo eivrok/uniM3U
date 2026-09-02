@@ -1,6 +1,6 @@
 {
   "name": "unim3u",
-  "version": "1.5.3",
+  "version": "1.6.0",
   "description": "UniM3U — a fast M3U IPTV player",
   "license": "MIT",
   "main": "main.js",
