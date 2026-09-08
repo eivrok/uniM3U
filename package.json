@@ -20,9 +20,9 @@
     "test:watch": "vitest"
   },
   "devDependencies": {
-    "electron": "^44.0.0",
+    "electron": "^44.1.1",
     "electron-builder": "^26.15.0",
-    "vitest": "^4.1.8"
+    "vitest": "^5.0.0"
   },
   "dependencies": {
     "electron-store": "^8.2.0",
