@@ -802,7 +802,9 @@ function renderChannelItems(list, emptyMsg, append = false, opts = {}) {
     const batch = list.slice(rendered, rendered + CHUNK_SIZE);
     const frag = document.createDocumentFragment();
     batch.forEach((c) => frag.appendChild(buildChannelItem(c, state.epgData, opts)));
+    const items = [...frag.children];
     channelList.insertBefore(frag, sentinel); // sentinel stays at the bottom
+    markTruncatedNames(items);
     rendered += batch.length;
     if (rendered >= list.length) cleanupListObserver();
   }
@@ -817,6 +819,19 @@ function renderChannelItems(list, emptyMsg, append = false, opts = {}) {
     );
     listObserver.observe(sentinel);
   }
+}
+
+/* A clamped name is cut with no way for CSS to expose the fact, so the full text
+   goes on title only for the rows that actually overflow. Measured after insert —
+   a detached node has no layout — and reads are batched ahead of the title writes
+   so the pass costs one reflow, not one per row. */
+function markTruncatedNames(items) {
+  const cut = [];
+  for (const item of items) {
+    const nameEl = item.querySelector('.channel-name');
+    if (nameEl && nameEl.scrollHeight > nameEl.clientHeight + 1) cut.push(nameEl);
+  }
+  for (const nameEl of cut) nameEl.title = nameEl.textContent;
 }
 
 function cleanupListObserver() {
@@ -851,8 +866,8 @@ function buildChannelItem(channel, epgData, { showSource = false } = {}) {
     img.className = 'channel-logo';
     img.loading = 'lazy';
     img.decoding = 'async';
-    img.width = 36;
-    img.height = 36;
+    img.width = 28;
+    img.height = 28;
     img.src = channel.logo;
     img.alt = '';
     img.onerror = () => {
@@ -886,19 +901,23 @@ function buildChannelItem(channel, epgData, { showSource = false } = {}) {
   nameEl.textContent = label.title;
   info.appendChild(nameEl);
 
-  // Second line: what's on now. Falling back to the provider tag would just
-  // reprint the category header on every row — it only earns the space in the
-  // flat lists (search, favourites) that have no category around them.
+  // Second line is reserved for what's on now — the one subtitle worth a whole
+  // line per row. The provider tag says the same thing on every row of a list,
+  // so in the flat lists (search, favourites) that have no category header it
+  // rides along as a chip and leaves the row one line tall.
   const prog = getCurrentProgram(epgData, channel.tvgId || channel.name);
-  const subtitle = prog ? prog.title : (showSource ? label.tag : null);
-  if (subtitle) {
+  if (prog) {
     const subEl = document.createElement('div');
-    subEl.className = prog ? 'channel-sub channel-epg-now' : 'channel-sub';
-    subEl.textContent = subtitle;
+    subEl.className = 'channel-sub channel-epg-now';
+    subEl.textContent = prog.title;
     info.appendChild(subEl);
   }
 
   item.appendChild(info);
+
+  if (!prog && showSource && label.tag) {
+    item.appendChild(el('span', 'channel-tag', label.tag));
+  }
 
   // A series is a container, not a stream: it has no url to favourite or play.
   // Favourites are keyed on url, and the fav-button below has no null guard —

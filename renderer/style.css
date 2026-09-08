@@ -15,7 +15,7 @@
   /* Selection is a neutral lift + accent bar, not a red slab: the accent
      stays a 3px marker so 20 rows of list don't compete with the video. */
   --row-active: rgba(255, 255, 255, 0.06);
-  --sidebar-w: 340px;
+  --sidebar-w: 300px;
   --radius-sm: 4px;
   --radius: 6px;
   --radius-lg: 12px;
@@ -233,8 +233,8 @@ input:focus-visible,
   border: 1px solid var(--border);
   border-radius: var(--radius);
   color: var(--text);
-  font-size: 13px;
-  padding: 8px 12px;
+  font-size: 15px;
+  padding: 9px 12px;
   outline: none;
 }
 #search-input:focus { border-color: var(--accent); }
@@ -280,15 +280,15 @@ input:focus-visible,
 .channel-item {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   /* 3px transparent bar reserved on every row so the active state colors it
      in place instead of shoving content 3px right on select. */
-  padding: 8px 12px 8px 9px;
+  padding: 6px 12px 6px 9px;
   border-left: 3px solid transparent;
   cursor: pointer;
   border-bottom: 1px solid rgba(255,255,255,0.03);
   transition: background var(--t-fast), border-color var(--t-fast);
-  min-height: 56px;
+  min-height: 40px;
 }
 .channel-item:hover { background: var(--bg3); }
 .channel-item.active { background: var(--row-active); border-left-color: var(--accent); }
@@ -302,8 +302,8 @@ input:focus-visible,
 }
 
 .channel-logo {
-  width: 36px;
-  height: 36px;
+  width: 28px;
+  height: 28px;
   border-radius: var(--radius-sm);
   object-fit: contain;
   background: var(--bg3);
@@ -311,14 +311,14 @@ input:focus-visible,
 }
 
 .channel-logo-placeholder {
-  width: 36px;
-  height: 36px;
+  width: 28px;
+  height: 28px;
   border-radius: var(--radius-sm);
   background: var(--bg3);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
+  font-size: 14px;
   flex-shrink: 0;
   color: var(--text3);
 }
@@ -356,9 +356,22 @@ input:focus-visible,
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  margin-top: 2px;
+  margin-top: 1px;
 }
 .channel-epg-now { color: var(--text2); }
+
+/* The provider tag is identical on every row of a country list, so it rides
+   along as a chip instead of spending a whole second line per row on it. */
+.channel-tag {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text3);
+  background: var(--bg3);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+}
 
 /* At rest a star per row is 20 identical grey dots of noise. It appears on
    hover, on keyboard focus, and permanently once the channel is a favourite. */
