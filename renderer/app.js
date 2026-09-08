@@ -915,7 +915,11 @@ function buildChannelItem(channel, epgData, { showSource = false } = {}) {
 
   item.appendChild(info);
 
-  if (!prog && showSource && label.tag) {
+  // Event rows already spend a 44px gutter on the timestamp; adding the chip on
+  // top leaves the title ~83px in a 300px sidebar, which clamps names like
+  // "Club Brugge - Monaco" down to nothing. The whole event category comes from
+  // one provider anyway, so the tag is the part that can go.
+  if (!prog && showSource && label.tag && !label.time && !label.date) {
     item.appendChild(el('span', 'channel-tag', label.tag));
   }
 

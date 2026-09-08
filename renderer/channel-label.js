@@ -14,6 +14,7 @@ const TAG_BRACKET = /^\[([^\]]+)\]\s*/;      // [Viaplay NO]
 const TAG_COUNTRY = /^([A-Z]{2,4}):\s+/;     // NO:  (letters only, so "20:35" is a time)
 const DATE = /^\((\d{1,2}\/\d{1,2})\)\s*/;   // (1/9)
 const TIME = /^(\d{1,2}:\d{2})\s+/;          // 20:35, needs a following space or it IS the title
+const ISO_TAIL = /\s*\((\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::\d{2})?\)$/; // (2026-09-08 15:53:13)
 
 /**
  * @param {string} name raw channel name from the playlist
@@ -50,6 +51,20 @@ export function parseChannelLabel(name) {
   if (t) {
     time = t[1];
     rest = rest.slice(t[0].length);
+  }
+
+  // Some providers put the start time at the *end* of the name as a full ISO
+  // stamp, where it costs the title 20+ characters of the row's width. The
+  // pattern is anchored to the end and fully specified so ordinary trailing
+  // parentheses — "Casablanca (1942)", "(repeat)" — don't match it. A name that
+  // is nothing but a timestamp keeps it: stripping would leave no title at all.
+  const iso = rest.match(ISO_TAIL);
+  if (iso && rest.slice(0, iso.index).trim()) {
+    rest = rest.slice(0, iso.index);
+    // A leading "(1/9) 20:35" is the provider's own label for the same event —
+    // it was written for this list, so it wins over the stamp at the back.
+    if (!date) date = `${Number(iso[3])}/${Number(iso[2])}`;
+    if (!time) time = `${iso[4]}:${iso[5]}`;
   }
 
   const title = rest.trim();

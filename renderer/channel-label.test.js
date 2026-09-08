@@ -41,6 +41,39 @@ describe('parseChannelLabel', () => {
     expect(parseChannelLabel('20:35 Monza').time).toBe('20:35');
   });
 
+  it('reads a trailing ISO timestamp as the time', () => {
+    expect(parseChannelLabel('Club Brugge vs. Aston Villa (2026-09-08 15:53:13)').time).toBe('15:53');
+  });
+
+  it('reads a trailing ISO timestamp as the date', () => {
+    expect(parseChannelLabel('Club Brugge vs. Aston Villa (2026-09-08 15:53:13)').date).toBe('8/9');
+  });
+
+  it('drops the trailing ISO timestamp from the title', () => {
+    expect(parseChannelLabel('Club Brugge vs. Aston Villa (2026-09-08 15:53:13)').title)
+      .toBe('Club Brugge vs. Aston Villa');
+  });
+
+  it('accepts a trailing ISO timestamp with a T separator', () => {
+    expect(parseChannelLabel('Dortmund vs. Villarreal (2026-09-08T17:23)').time).toBe('17:23');
+  });
+
+  it('keeps a leading time when the name also ends in an ISO timestamp', () => {
+    expect(parseChannelLabel('20:35 Monza (2026-09-08 15:53:13)').time).toBe('20:35');
+  });
+
+  it('leaves a trailing year in parentheses alone', () => {
+    expect(parseChannelLabel('Casablanca (1942)').title).toBe('Casablanca (1942)');
+  });
+
+  it('leaves a trailing non-timestamp parenthetical alone', () => {
+    expect(parseChannelLabel('Match of the Day (repeat)').title).toBe('Match of the Day (repeat)');
+  });
+
+  it('keeps a name that is nothing but a timestamp as the title', () => {
+    expect(parseChannelLabel('(2026-09-08 15:53:13)').title).toBe('(2026-09-08 15:53:13)');
+  });
+
   it('keeps a name that is nothing but metadata as the title', () => {
     expect(parseChannelLabel('[Viaplay NO]').title).toBe('[Viaplay NO]');
   });
