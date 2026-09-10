@@ -228,6 +228,7 @@ export class Player {
 
     const timeout = stallTimeoutMs({ hasPlayed: this._hasPlayed, bufferGrowing });
     if (now - this._lastProgressAt >= timeout) {
+      console.warn(`[diag] stall after ${timeout}ms — ${this._bufferSnapshot()}`);
       this._recover('stall');
     }
   }
@@ -235,6 +236,19 @@ export class Player {
   _bufferedEnd() {
     const { buffered } = this.video;
     return buffered.length ? buffered.end(buffered.length - 1) : 0;
+  }
+
+  // Distinguishes a starved stream (buffer ends at currentTime) from one wedged
+  // against a gap in the buffer (another range starts just ahead of it). The
+  // two look identical from currentTime alone but need opposite fixes.
+  _bufferSnapshot() {
+    const { buffered, currentTime, readyState } = this.video;
+    const ranges = [];
+    for (let i = 0; i < buffered.length; i += 1) {
+      ranges.push(`${buffered.start(i).toFixed(2)}-${buffered.end(i).toFixed(2)}`);
+    }
+    return `currentTime=${currentTime.toFixed(2)} readyState=${readyState} `
+      + `buffered=${ranges.length ? ranges.join(' | ') : '(empty)'}`;
   }
 
   // Corrupted frames still advance currentTime, so the stall watchdog cannot
