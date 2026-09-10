@@ -45,14 +45,43 @@ function runStallCycle(timeoutMs, backoffMs) {
   vi.advanceTimersByTime(backoffMs);
 }
 
+function fakeNetwork() {
+  return {
+    online: true,
+    onlineCbs: [],
+    offlineCbs: [],
+    isOnline() {
+      return this.online;
+    },
+    onOnline(cb) {
+      this.onlineCbs.push(cb);
+      return () => {};
+    },
+    onOffline(cb) {
+      this.offlineCbs.push(cb);
+      return () => {};
+    },
+    goOffline() {
+      this.online = false;
+      this.offlineCbs.forEach((cb) => cb());
+    },
+    goOnline() {
+      this.online = true;
+      this.onlineCbs.forEach((cb) => cb());
+    },
+  };
+}
+
 describe('Player stream recovery', () => {
   let video;
+  let net;
   let player;
 
   beforeEach(() => {
     vi.useFakeTimers();
     video = fakeVideo();
-    player = new Player(video);
+    net = fakeNetwork();
+    player = new Player(video, net);
   });
 
   afterEach(() => {
@@ -151,6 +180,66 @@ describe('Player stream recovery', () => {
     runStallCycle(STARTUP_TIMEOUT_MS, 1000);
 
     expect(video.playCount).toBe(afterSwitch + 1);
+  });
+
+  it('does not reload a stalled stream while the machine is offline', () => {
+    player.load(VOD_URL);
+    video.currentTime = 5;
+    vi.advanceTimersByTime(STALL_POLL_MS);
+    net.goOffline();
+
+    runStallCycle(STALL_TIMEOUT_MS, 1000);
+    expect(video.playCount).toBe(1);
+  });
+
+  it('spends no attempt budget on an outage', () => {
+    player.load(VOD_URL);
+    video.currentTime = 5;
+    vi.advanceTimersByTime(STALL_POLL_MS);
+    net.goOffline();
+    runStallCycle(STALL_TIMEOUT_MS, 1000);
+
+    expect(player._attempt).toBe(0);
+  });
+
+  it('survives an outage longer than the whole backoff ladder', () => {
+    player.load(VOD_URL);
+    video.currentTime = 5;
+    vi.advanceTimersByTime(STALL_POLL_MS);
+    net.goOffline();
+    vi.advanceTimersByTime(10 * 60 * 1000);
+    net.goOnline();
+
+    expect(video.playCount).toBe(2);
+  });
+
+  it('reloads as soon as the network returns, without waiting out a backoff', () => {
+    player.load(VOD_URL);
+    video.currentTime = 5;
+    vi.advanceTimersByTime(STALL_POLL_MS);
+    net.goOffline();
+    runStallCycle(STALL_TIMEOUT_MS, 1000);
+    net.goOnline();
+
+    expect(video.playCount).toBe(2);
+  });
+
+  it('drops a retry that was already scheduled when the network went away', () => {
+    player.load(VOD_URL);
+    video.currentTime = 5;
+    vi.advanceTimersByTime(STALL_POLL_MS);
+    // Stops on the poll that detects the stall, before its 1000ms retry fires.
+    vi.advanceTimersByTime(STALL_TIMEOUT_MS);
+    net.goOffline();
+    vi.advanceTimersByTime(60_000);
+
+    expect(video.playCount).toBe(1);
+  });
+
+  it('ignores the network returning when no channel is loaded', () => {
+    net.goOffline();
+    net.goOnline();
+    expect(video.playCount).toBe(0);
   });
 
   it('stops the watchdog when the player is destroyed', () => {

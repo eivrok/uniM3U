@@ -33,6 +33,16 @@ export function stallTimeoutMs({ hasPlayed, bufferGrowing }) {
 // drop starts the ladder over from the top instead of inheriting old attempts.
 export const STABLE_PLAYBACK_MS = 10_000;
 
+/**
+ * A live stream has no end, so its duration is Infinity (or NaN before the
+ * first segment lands). A finite duration means a VOD file is being played
+ * through the live path, where the loader finishing is the end of the file
+ * rather than a dropped connection.
+ */
+export function isLiveDuration(duration) {
+  return !Number.isFinite(duration);
+}
+
 export function retryDelayMs(attempt) {
   const delay = BASE_DELAY_MS * 2 ** (attempt - 1);
   return Math.min(delay, MAX_DELAY_MS);
@@ -43,10 +53,19 @@ export function retryDelayMs(attempt) {
  * @param {'hls'|'mpegts'|'native'} args.engine
  * @param {'network'|'media'|'other'|'stall'} args.kind
  * @param {number} args.attempt  1-based count of consecutive recovery attempts
- * @returns {{action: 'resume-load'|'recover-media'|'reload'|'give-up',
+ * @param {boolean} [args.online]  whether the machine has a network connection
+ * @returns {{action: 'resume-load'|'recover-media'|'reload'|'wait-for-network'
+ *                    |'give-up',
  *            delayMs?: number, swapAudioCodec?: boolean}}
  */
-export function planRecovery({ engine, kind, attempt }) {
+export function planRecovery({ engine, kind, attempt, online = true }) {
+  // Retrying while the machine is offline spends the attempt budget on requests
+  // that cannot succeed, so a lid close or a wifi flap would exhaust the ladder
+  // and leave the channel dead once the network came back. Hold instead, and
+  // let the online event drive the retry. Checked before the budget so an
+  // outage can never be what gives up.
+  if (!online) return { action: 'wait-for-network' };
+
   if (attempt > MAX_ATTEMPTS) return { action: 'give-up' };
 
   const delayMs = retryDelayMs(attempt);

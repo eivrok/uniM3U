@@ -3,6 +3,7 @@ import {
   planRecovery,
   retryDelayMs,
   stallTimeoutMs,
+  isLiveDuration,
   MAX_ATTEMPTS,
   BASE_DELAY_MS,
   MAX_DELAY_MS,
@@ -39,6 +40,26 @@ describe('stallTimeoutMs', () => {
 });
 
 describe('planRecovery', () => {
+  it('holds instead of retrying while the machine is offline', () => {
+    const plan = planRecovery({ engine: 'mpegts', kind: 'network', attempt: 1, online: false });
+    expect(plan.action).toBe('wait-for-network');
+  });
+
+  it('never gives up on an offline stream, however long the outage runs', () => {
+    const plan = planRecovery({
+      engine: 'mpegts',
+      kind: 'network',
+      attempt: MAX_ATTEMPTS + 99,
+      online: false,
+    });
+    expect(plan.action).toBe('wait-for-network');
+  });
+
+  it('treats a caller that says nothing about the network as online', () => {
+    const plan = planRecovery({ engine: 'mpegts', kind: 'network', attempt: 1 });
+    expect(plan.action).toBe('reload');
+  });
+
   it('gives up once the attempt budget is spent', () => {
     const plan = planRecovery({ engine: 'hls', kind: 'network', attempt: MAX_ATTEMPTS + 1 });
     expect(plan.action).toBe('give-up');
@@ -107,5 +128,23 @@ describe('planRecovery', () => {
   it('backs off further on each consecutive attempt', () => {
     const plan = planRecovery({ engine: 'mpegts', kind: 'network', attempt: 4 });
     expect(plan.delayMs).toBe(retryDelayMs(4));
+  });
+});
+
+describe('isLiveDuration', () => {
+  it('treats an endless stream as live', () => {
+    expect(isLiveDuration(Infinity)).toBe(true);
+  });
+
+  it('treats a stream with no duration yet as live', () => {
+    expect(isLiveDuration(NaN)).toBe(true);
+  });
+
+  it('treats a fixed-length file as not live, so its loader may finish', () => {
+    expect(isLiveDuration(3600)).toBe(false);
+  });
+
+  it('treats a zero duration as not live', () => {
+    expect(isLiveDuration(0)).toBe(false);
   });
 });

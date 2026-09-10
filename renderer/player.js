@@ -8,6 +8,7 @@
 import {
   planRecovery,
   stallTimeoutMs,
+  isLiveDuration,
   STALL_POLL_MS,
   STABLE_PLAYBACK_MS,
   MAX_ATTEMPTS,
@@ -15,8 +16,15 @@ import {
 import { redactUrl } from './redact.js';
 
 export class Player {
-  constructor(videoEl) {
+  // `net` is a seam for tests; the default reads the real browser connection.
+  // Its listeners are bound for the lifetime of the Player and deliberately not
+  // removed by _destroy(), which runs on every channel switch.
+  constructor(videoEl, net = browserNetwork()) {
     this.video = videoEl;
+    this._net = net;
+    this._waitingForNetwork = false;
+    net.onOnline(() => this._handleOnline());
+    net.onOffline(() => this._handleOffline());
     this._hls = null;
     this._mpegts = null;
     this._url = null;
@@ -27,7 +35,6 @@ export class Player {
     this._lastTime = 0;
     this._lastProgressAt = 0;
     this._recoveredAt = 0;
-    this._lastDropped = 0;
     this._lastBufferedEnd = 0;
     this._hasPlayed = false;
   }
@@ -39,6 +46,7 @@ export class Player {
     // a reconnect inherits both from the channel it is recovering.
     this._attempt = 0;
     this._hasPlayed = false;
+    this._waitingForNetwork = false;
     this._start(url);
   }
 
@@ -110,7 +118,11 @@ export class Player {
       liveBufferLatencyChasing: false,
       liveBufferLatencyMaxLatency: 10.0,
       liveBufferLatencyMinRemain: 4.0,
-      lazyLoadMaxDuration: 3 * 60,
+      // Lazy load suspends the download once enough is buffered ahead, which
+      // makes no sense on a live stream: there is nothing to catch up on, and
+      // resuming just re-opens the connection at the new live edge. Left on, it
+      // is a second source of the dropped connections this player recovers from.
+      lazyLoad: false,
       seekType: 'range',
       // Larger IO buffer reduces stalls on variable-bitrate streams
       stashInitialSize: 1024 * 512,
@@ -119,10 +131,13 @@ export class Player {
       console.error('mpegts error:', type, details);
       this._recover(mpegtsKind(type));
     });
-    // mpegts.js reconnects early EOFs by itself without raising an error, so
-    // this is the only way to see that class of drop from out here.
-    this._mpegts.on(window.mpegts.Events.RECOVERED_EARLY_EOF, () => {
-      console.warn('[diag] mpegts recovered an early EOF on its own');
+    // A live loader that completes means the source closed the connection.
+    // mpegts.js raises no error for it, so without this the stall watchdog is
+    // what eventually notices — ten seconds of frozen picture later.
+    this._mpegts.on(window.mpegts.Events.LOADING_COMPLETE, () => {
+      if (!isLiveDuration(this.video.duration)) return;
+      console.warn('Source closed the connection');
+      this._recover('network');
     });
     this._mpegts.attachMediaElement(this.video);
     this._mpegts.load();
@@ -136,8 +151,24 @@ export class Player {
     // fire alongside them. Let the scheduled attempt play out first.
     if (this._retryTimer) return;
 
+    // Planned against attempt + 1 so the budget is only spent once the ladder
+    // commits to acting; holding for the network must cost nothing.
+    const plan = planRecovery({
+      engine: this._engine,
+      kind,
+      attempt: this._attempt + 1,
+      online: this._net.isOnline(),
+    });
+
+    if (plan.action === 'wait-for-network') {
+      if (!this._waitingForNetwork) {
+        this._waitingForNetwork = true;
+        console.warn('Offline — holding stream recovery until the network returns');
+      }
+      return;
+    }
+
     this._attempt += 1;
-    const plan = planRecovery({ engine: this._engine, kind, attempt: this._attempt });
 
     if (plan.action === 'give-up') {
       console.error(
@@ -180,6 +211,27 @@ export class Player {
     }
   }
 
+  // --- Network transitions ---
+
+  _handleOffline() {
+    // A retry scheduled before the network went away cannot succeed, so drop it
+    // rather than letting it fail and pull the ladder a rung further down.
+    clearTimeout(this._retryTimer);
+    this._retryTimer = null;
+    this._waitingForNetwork = true;
+  }
+
+  _handleOnline() {
+    if (!this._waitingForNetwork || !this._url) return;
+    this._waitingForNetwork = false;
+    console.warn('Network is back — reloading the stream');
+    // The outage was not the stream's fault, so it starts again on a full
+    // budget rather than whatever the drop left behind.
+    this._attempt = 0;
+    this._teardownEngines();
+    this._start(this._url);
+  }
+
   // --- Stall watchdog ---
   //
   // A dead IPTV stream often just stops sending bytes: no error reaches either
@@ -189,7 +241,6 @@ export class Player {
   _startStallWatch() {
     this._stopStallWatch();
     this._lastTime = this.video.currentTime;
-    this._lastDropped = 0;
     this._lastBufferedEnd = this._bufferedEnd();
     this._lastProgressAt = Date.now();
     this._stallTimer = setInterval(() => this._checkStall(), STALL_POLL_MS);
@@ -202,7 +253,6 @@ export class Player {
 
   _checkStall() {
     const now = Date.now();
-    this._sampleDroppedFrames();
 
     // A user-paused, seeking or finished stream is not a stall.
     if (this.video.paused || this.video.seeking || this.video.ended) {
@@ -228,7 +278,6 @@ export class Player {
 
     const timeout = stallTimeoutMs({ hasPlayed: this._hasPlayed, bufferGrowing });
     if (now - this._lastProgressAt >= timeout) {
-      console.warn(`[diag] stall after ${timeout}ms — ${this._bufferSnapshot()}`);
       this._recover('stall');
     }
   }
@@ -236,32 +285,6 @@ export class Player {
   _bufferedEnd() {
     const { buffered } = this.video;
     return buffered.length ? buffered.end(buffered.length - 1) : 0;
-  }
-
-  // Distinguishes a starved stream (buffer ends at currentTime) from one wedged
-  // against a gap in the buffer (another range starts just ahead of it). The
-  // two look identical from currentTime alone but need opposite fixes.
-  _bufferSnapshot() {
-    const { buffered, currentTime, readyState } = this.video;
-    const ranges = [];
-    for (let i = 0; i < buffered.length; i += 1) {
-      ranges.push(`${buffered.start(i).toFixed(2)}-${buffered.end(i).toFixed(2)}`);
-    }
-    return `currentTime=${currentTime.toFixed(2)} readyState=${readyState} `
-      + `buffered=${ranges.length ? ranges.join(' | ') : '(empty)'}`;
-  }
-
-  // Corrupted frames still advance currentTime, so the stall watchdog cannot
-  // see them. Dropped frames are the closest available proxy for the packet
-  // loss that causes them. Diagnostic only — nothing acts on this yet.
-  _sampleDroppedFrames() {
-    if (typeof this.video.getVideoPlaybackQuality !== 'function') return;
-    const { droppedVideoFrames } = this.video.getVideoPlaybackQuality();
-    const dropped = droppedVideoFrames - this._lastDropped;
-    this._lastDropped = droppedVideoFrames;
-    if (dropped > 0) {
-      console.warn(`[diag] ${dropped} video frames dropped in the last ${STALL_POLL_MS}ms`);
-    }
   }
 
   // --- Teardown ---
@@ -289,7 +312,24 @@ export class Player {
     this._teardownEngines();
     this._url = null;
     this._engine = null;
+    this._waitingForNetwork = false;
   }
+}
+
+// navigator.onLine only reports whether the machine has *a* network, not whether
+// the provider is reachable. That is enough here: it is reliable when false,
+// which is the direction that matters for holding off retries.
+function browserNetwork() {
+  const bind = (event, cb) => {
+    if (typeof window === 'undefined') return () => {};
+    window.addEventListener(event, cb);
+    return () => window.removeEventListener(event, cb);
+  };
+  return {
+    isOnline: () => (typeof navigator === 'undefined' ? true : navigator.onLine !== false),
+    onOnline: (cb) => bind('online', cb),
+    onOffline: (cb) => bind('offline', cb),
+  };
 }
 
 function hlsKind(type) {
