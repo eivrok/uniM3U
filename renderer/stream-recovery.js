@@ -33,6 +33,15 @@ export function stallTimeoutMs({ hasPlayed, bufferGrowing }) {
 // drop starts the ladder over from the top instead of inheriting old attempts.
 export const STABLE_PLAYBACK_MS = 10_000;
 
+// Stable playback resets the attempt count, so a stream that plays for a while
+// between every failure can ride the ladder forever without ever reaching the
+// end of it. A transmux fault that throws roughly every half minute does
+// exactly that. This budget is the backstop: however often the attempt count
+// resets, this many recoveries inside the window means reloading is not
+// working and the ladder stops.
+export const RECOVERY_WINDOW_MS = 180_000;
+export const MAX_RECOVERIES_PER_WINDOW = 5;
+
 /**
  * A live stream has no end, so its duration is Infinity (or NaN before the
  * first segment lands). A finite duration means a VOD file is being played
@@ -54,11 +63,21 @@ export function retryDelayMs(attempt) {
  * @param {'network'|'media'|'other'|'stall'} args.kind
  * @param {number} args.attempt  1-based count of consecutive recovery attempts
  * @param {boolean} [args.online]  whether the machine has a network connection
+ * @param {number} [args.now]  current time, for the recovery-budget window
+ * @param {number[]} [args.recentRecoveries]  timestamps of recoveries already
+ *   applied to this stream, oldest first
  * @returns {{action: 'resume-load'|'recover-media'|'reload'|'wait-for-network'
  *                    |'give-up',
  *            delayMs?: number, swapAudioCodec?: boolean}}
  */
-export function planRecovery({ engine, kind, attempt, online = true }) {
+export function planRecovery({
+  engine,
+  kind,
+  attempt,
+  online = true,
+  now = Date.now(),
+  recentRecoveries = [],
+}) {
   // Retrying while the machine is offline spends the attempt budget on requests
   // that cannot succeed, so a lid close or a wifi flap would exhaust the ladder
   // and leave the channel dead once the network came back. Hold instead, and
@@ -67,6 +86,11 @@ export function planRecovery({ engine, kind, attempt, online = true }) {
   if (!online) return { action: 'wait-for-network' };
 
   if (attempt > MAX_ATTEMPTS) return { action: 'give-up' };
+
+  // Counted after the offline check so a network outage still costs nothing,
+  // and before the engine-specific branches so every action shares the backstop.
+  const inWindow = recentRecoveries.filter((at) => now - at < RECOVERY_WINDOW_MS);
+  if (inWindow.length >= MAX_RECOVERIES_PER_WINDOW) return { action: 'give-up' };
 
   const delayMs = retryDelayMs(attempt);
 

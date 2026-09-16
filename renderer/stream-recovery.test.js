@@ -9,6 +9,8 @@ import {
   MAX_DELAY_MS,
   STALL_TIMEOUT_MS,
   STARTUP_TIMEOUT_MS,
+  RECOVERY_WINDOW_MS,
+  MAX_RECOVERIES_PER_WINDOW,
 } from './stream-recovery.js';
 
 describe('retryDelayMs', () => {
@@ -146,5 +148,50 @@ describe('isLiveDuration', () => {
 
   it('treats a zero duration as not live', () => {
     expect(isLiveDuration(0)).toBe(false);
+  });
+});
+
+describe('planRecovery recovery budget', () => {
+  // A full budget of reloads, the most recent at 120s.
+  const window = Array.from(
+    { length: MAX_RECOVERIES_PER_WINDOW },
+    (_, i) => 120_000 - (MAX_RECOVERIES_PER_WINDOW - 1 - i) * 30_000,
+  );
+
+  it('gives up when reloads keep repeating inside the budget window', () => {
+    expect(
+      planRecovery({
+        engine: 'mpegts',
+        kind: 'network',
+        attempt: 1,
+        now: 150_000,
+        recentRecoveries: window,
+      }).action,
+    ).toBe('give-up');
+  });
+
+  it('reloads again once the earlier failures have aged out of the window', () => {
+    expect(
+      planRecovery({
+        engine: 'mpegts',
+        kind: 'network',
+        attempt: 1,
+        now: 120_000 + RECOVERY_WINDOW_MS + 1,
+        recentRecoveries: window,
+      }).action,
+    ).toBe('reload');
+  });
+
+  it('ignores the budget while the machine is offline', () => {
+    expect(
+      planRecovery({
+        engine: 'mpegts',
+        kind: 'network',
+        attempt: 1,
+        now: 150_000,
+        recentRecoveries: window,
+        online: false,
+      }).action,
+    ).toBe('wait-for-network');
   });
 });
