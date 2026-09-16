@@ -6,6 +6,8 @@ import {
   STARTUP_TIMEOUT_MS,
   STABLE_PLAYBACK_MS,
   MAX_ATTEMPTS,
+  BASE_DELAY_MS,
+  MAX_RECOVERIES_PER_WINDOW,
 } from './stream-recovery.js';
 
 // A .mp4 url routes to the native path, which touches only the video element —
@@ -246,5 +248,70 @@ describe('Player stream recovery', () => {
     player.load(VOD_URL);
     player._destroy();
     expect(vi.getTimerCount()).toBe(0);
+  });
+  // Reproduces the mpegts transmux loop seen on live Xtream streams: the
+  // remuxer throws, the error surfaces as a network error, the reload succeeds,
+  // and the stream plays long enough to reset the attempt count before throwing
+  // again. Resetting on stable playback alone, the ladder reloaded forever.
+  it('gives up on a stream that keeps failing after playing between reloads', () => {
+    player.load(VOD_URL);
+    video.currentTime = 5;
+    vi.advanceTimersByTime(STALL_POLL_MS);
+
+    for (let i = 0; i < MAX_RECOVERIES_PER_WINDOW + 2; i++) {
+      playFor(video, STABLE_PLAYBACK_MS * 2);
+      runStallCycle(STALL_TIMEOUT_MS, BASE_DELAY_MS);
+    }
+
+    expect(video.playCount).toBeLessThanOrEqual(MAX_RECOVERIES_PER_WINDOW + 1);
+  });
+});
+
+describe('mpegts transmux configuration', () => {
+  let video;
+  let net;
+  let player;
+  let config;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    video = fakeVideo();
+    net = fakeNetwork();
+    config = null;
+    globalThis.window = {
+      mpegts: {
+        isSupported: () => true,
+        Events: { ERROR: 'error', LOADING_COMPLETE: 'loading_complete' },
+        ErrorTypes: { NETWORK_ERROR: 'NetworkError', MEDIA_ERROR: 'MediaError' },
+        createPlayer: (_source, cfg) => {
+          config = cfg;
+          return {
+            on() {},
+            attachMediaElement() {},
+            load() {},
+            destroy() {},
+            play: () => Promise.resolve(),
+          };
+        },
+      },
+    };
+    player = new Player(video, net);
+  });
+
+  afterEach(() => {
+    player._destroy();
+    vi.useRealTimers();
+    delete globalThis.window;
+  });
+
+  // A provider whose audio DTS runs on its own long-uptime clock produces a
+  // multi-hour dtsCorrection, and mpegts.js answers it by generating one silent
+  // frame per frame of "gap" — millions of them — then flushing the array with
+  // push.apply, which overflows the stack. The thrown RangeError surfaces as a
+  // network error, so the ladder reloads, and the fresh remuxer reference
+  // reproduces the same gap. Filling a gap that large was never meaningful.
+  it('disables silent-frame gap filling, which overflows the stack on live streams', () => {
+    player.load('http://example.com:8080/user/pass/145689');
+    expect(config.fixAudioTimestampGap).toBe(false);
   });
 });

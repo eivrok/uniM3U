@@ -11,6 +11,7 @@ import {
   isLiveDuration,
   STALL_POLL_MS,
   STABLE_PLAYBACK_MS,
+  RECOVERY_WINDOW_MS,
   MAX_ATTEMPTS,
 } from './stream-recovery.js';
 import { redactUrl } from './redact.js';
@@ -30,6 +31,7 @@ export class Player {
     this._url = null;
     this._engine = null;
     this._attempt = 0;
+    this._recoveries = [];
     this._retryTimer = null;
     this._stallTimer = null;
     this._lastTime = 0;
@@ -45,6 +47,7 @@ export class Player {
     // A new channel starts with a clean budget and its own startup grace;
     // a reconnect inherits both from the channel it is recovering.
     this._attempt = 0;
+    this._recoveries = [];
     this._hasPlayed = false;
     this._waitingForNetwork = false;
     this._start(url);
@@ -123,6 +126,14 @@ export class Player {
       // resuming just re-opens the connection at the new live edge. Left on, it
       // is a second source of the dropped connections this player recovers from.
       lazyLoad: false,
+      // mpegts.js answers a large audio DTS discontinuity by generating one
+      // silent frame per frame of gap. Providers whose stream clock runs on
+      // their own uptime produce corrections of many hours, so the fill runs to
+      // millions of frames and the array is flushed with push.apply — which
+      // overflows the stack. The RangeError surfaces as a network error, the
+      // ladder reloads, and the fresh remuxer reference recreates the same gap.
+      // A gap that size is a reference mismatch, not audio worth filling.
+      fixAudioTimestampGap: false,
       seekType: 'range',
       // Larger IO buffer reduces stalls on variable-bitrate streams
       stashInitialSize: 1024 * 512,
@@ -158,6 +169,8 @@ export class Player {
       kind,
       attempt: this._attempt + 1,
       online: this._net.isOnline(),
+      now: Date.now(),
+      recentRecoveries: this._recoveries,
     });
 
     if (plan.action === 'wait-for-network') {
@@ -172,7 +185,9 @@ export class Player {
 
     if (plan.action === 'give-up') {
       console.error(
-        `Stream recovery gave up after ${MAX_ATTEMPTS} attempts:`,
+        `Stream recovery gave up after ${this._attempt} consecutive attempts ` +
+        `and ${this._recoveries.length} recoveries in the last ` +
+        `${RECOVERY_WINDOW_MS / 1000}s:`,
         redactUrl(this._url),
       );
       this._stopStallWatch();
@@ -194,6 +209,9 @@ export class Player {
 
     this._recoveredAt = Date.now();
     this._lastProgressAt = this._recoveredAt;
+    this._recoveries = this._recoveries
+      .filter((at) => this._recoveredAt - at < RECOVERY_WINDOW_MS)
+      .concat(this._recoveredAt);
 
     switch (plan.action) {
       case 'resume-load':
@@ -228,6 +246,7 @@ export class Player {
     // The outage was not the stream's fault, so it starts again on a full
     // budget rather than whatever the drop left behind.
     this._attempt = 0;
+    this._recoveries = [];
     this._teardownEngines();
     this._start(this._url);
   }
