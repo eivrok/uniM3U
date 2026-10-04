@@ -7,6 +7,8 @@ import { loadEPG, getProgramsForChannel, getCurrentProgram, getNextProgram } fro
 import { Player } from './player.js';
 import { clampIdleSeconds, formatIdleLabel, decideChrome } from './idle.js';
 import { parseChannelLabel } from './channel-label.js';
+import { searchChannels } from './search.js';
+import { createSearchOverlay } from './search-overlay.js';
 
 const api = window.api;
 
@@ -79,6 +81,19 @@ const countriesAllBtn = document.getElementById('countries-all');
 const countriesNoneBtn = document.getElementById('countries-none');
 const countriesChecklist = document.getElementById('countries-checklist');
 const countriesSave = document.getElementById('countries-save');
+
+// Big search overlay (TV viewing). Rows are built by the sidebar's own builder
+// so a result plays, favourites and opens series exactly like the sidebar row.
+const searchOverlayBtn = document.getElementById('search-overlay-btn');
+const searchOverlay = createSearchOverlay({
+  root: document.getElementById('search-overlay'),
+  input: document.getElementById('so-input'),
+  list: document.getElementById('so-list'),
+  status: document.getElementById('so-status'),
+  getChannels: () => state.channels,
+  isVisible: isCountryVisible,
+  buildRow: (c) => buildChannelItem(c, state.epgData, { showSource: true }),
+});
 
 // Brand logo — use assets/logo.png if it loads, otherwise fall back to the text.
 const appLogo = document.getElementById('app-logo');
@@ -193,6 +208,7 @@ function applyIdleState() {
   const { immersive, overlay } = decideChrome({
     playing: isPlaying(),
     settingsOpen: !settingsScreen.classList.contains('hidden'),
+    searchOpen: searchOverlay.isOpen(),
     idleHideSeconds: state.idleHideSeconds,
     idleElapsedMs: Date.now() - lastInputAt,
   });
@@ -669,9 +685,7 @@ function render() {
 
   // Search cuts across all visible channels, ignoring drill/collapse state.
   if (q) {
-    const results = state.channels.filter(
-      (c) => isCountryVisible(c.country) && c.name.toLowerCase().includes(q)
-    );
+    const { results } = searchChannels(state.channels, q, isCountryVisible);
     renderChannelItems(results, 'No channels match your search', false, { showSource: true });
     return;
   }
@@ -1347,7 +1361,9 @@ reloadModal.addEventListener('click', (e) => {
 // then settings if channels are loaded).
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
-  if (!reloadModal.classList.contains('hidden')) {
+  if (searchOverlay.isOpen()) {
+    searchOverlay.close();
+  } else if (!reloadModal.classList.contains('hidden')) {
     closeReloadModal();
   } else if (!countriesModal.classList.contains('hidden')) {
     closeCountriesModal();
@@ -1376,6 +1392,7 @@ document.addEventListener('keydown', (e) => {
   // Only when the main screen is interactive and no overlay is capturing input.
   if (!settingsScreen.classList.contains('hidden')) return;
   if (!reloadModal.classList.contains('hidden') || !countriesModal.classList.contains('hidden')) return;
+  if (searchOverlay.isOpen()) return; // the overlay drives its own highlight
   // Don't steal keys from text fields (the single-line search has no use for
   // up/down, so we allow list nav from there).
   const ae = document.activeElement;
@@ -1401,6 +1418,9 @@ document.addEventListener('keydown', (e) => {
 document.addEventListener('keydown', (e) => {
   if (!settingsScreen.classList.contains('hidden')) return;
   if (!reloadModal.classList.contains('hidden') || !countriesModal.classList.contains('hidden')) return;
+  if (searchOverlay.isOpen()) return;
+  // Ctrl/Cmd+F opens the search overlay; it must not also toggle fullscreen.
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
   const ae = document.activeElement;
   if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'SELECT' || ae.tagName === 'TEXTAREA')) return;
   if (!state.activeChannelId) return;
@@ -1413,6 +1433,24 @@ document.addEventListener('keydown', (e) => {
   } else if (e.key === 'f' || e.key === 'F') {
     toggleFullscreen();
   }
+});
+
+// Open the big search with "/" (not while typing elsewhere) or Ctrl/Cmd+F.
+document.addEventListener('keydown', (e) => {
+  if (searchOverlay.isOpen() || state.channels.length === 0) return;
+  if (!settingsScreen.classList.contains('hidden')) return;
+  if (!reloadModal.classList.contains('hidden') || !countriesModal.classList.contains('hidden')) return;
+  const ae = document.activeElement;
+  const typing = ae && (ae.tagName === 'INPUT' || ae.tagName === 'SELECT' || ae.tagName === 'TEXTAREA');
+  const findKey = (e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F');
+  if (findKey || (e.key === '/' && !typing)) {
+    e.preventDefault();
+    searchOverlay.open();
+  }
+});
+
+searchOverlayBtn.addEventListener('click', () => {
+  if (state.channels.length > 0) searchOverlay.open();
 });
 
 const debouncedRender = debounce(render, 150);

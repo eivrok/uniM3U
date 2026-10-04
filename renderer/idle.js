@@ -42,10 +42,12 @@ export const OVERLAY_FADE_MS = 3000;
  * settings screen is closed — otherwise immersive must not engage behind an
  * open settings card. The now-playing overlay is a short peek (OVERLAY_FADE_MS)
  * after the last input, on its own timer, independent of the full-chrome hide;
- * it is always gone once immersive engages.
+ * it is always gone once immersive engages. The search overlay counts like
+ * settings: someone reading results from the couch is idle by the timer, and
+ * immersive would hide the cursor and resize the window under them.
  */
-export function decideChrome({ playing, settingsOpen, idleHideSeconds, idleElapsedMs }) {
-  if (!playing || settingsOpen) return { immersive: false, overlay: false };
+export function decideChrome({ playing, settingsOpen, searchOpen = false, idleHideSeconds, idleElapsedMs }) {
+  if (!playing || settingsOpen || searchOpen) return { immersive: false, overlay: false };
   const immersive = shouldHideChrome({ playing, idleHideSeconds, idleElapsedMs });
   const overlay = !immersive && idleElapsedMs < OVERLAY_FADE_MS;
   return { immersive, overlay };

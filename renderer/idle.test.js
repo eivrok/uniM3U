@@ -64,6 +64,11 @@ describe('decideChrome', () => {
       .toEqual({ immersive: false, overlay: false });
   });
 
+  it('never engages immersive while the search overlay is open', () => {
+    expect(decideChrome({ playing: true, settingsOpen: false, searchOpen: true, idleHideSeconds: 5, idleElapsedMs: 9999 }))
+      .toEqual({ immersive: false, overlay: false });
+  });
+
   it('shows the overlay but stays out of immersive in the peek window', () => {
     expect(decideChrome({ playing: true, settingsOpen: false, idleHideSeconds: 5, idleElapsedMs: 1000 }))
       .toEqual({ immersive: false, overlay: true });

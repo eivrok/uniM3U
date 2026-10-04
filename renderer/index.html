@@ -59,6 +59,9 @@
             <span id="brand-text" class="app-title">UniM3U</span>
           </div>
           <div class="header-actions">
+            <button id="search-overlay-btn" class="icon-btn" title="Big search (/)" aria-label="Open big search">
+              <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></svg>
+            </button>
             <button id="countries-btn" class="icon-btn" title="Choose countries" aria-label="Choose countries">🌐&#xFE0E;</button>
             <button id="reload-btn" class="icon-btn" title="Reload playlist" aria-label="Reload playlist">↻</button>
             <button id="settings-btn" class="icon-btn" title="Settings" aria-label="Settings">⚙</button>
@@ -140,6 +143,16 @@
         <div id="empty-state">
           <div class="empty-icon">📺</div>
           <p id="empty-state-text">Select a channel to start watching</p>
+        </div>
+
+        <!-- Big search for TV viewing. Inside #player-area so it still draws
+             when the player area is fullscreen. -->
+        <div id="search-overlay" class="hidden">
+          <div class="so-panel">
+            <input type="search" id="so-input" placeholder="Search channels…" autocomplete="off" spellcheck="false" />
+            <div id="so-status" class="so-status"></div>
+            <div id="so-list"></div>
+          </div>
         </div>
       </main>
     </div>
