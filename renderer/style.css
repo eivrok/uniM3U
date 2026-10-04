@@ -974,3 +974,76 @@ input:focus-visible,
 #main-screen.immersive #player-overlay { opacity: 0; pointer-events: none; }
 #main-screen.immersive #player-area { cursor: none; }
 #main-screen.immersive #player-controls { opacity: 0; pointer-events: none; }
+
+/* ---- Big search overlay (TV viewing) ----
+   Read from across a room, so everything is roughly 2x the sidebar. Absolute
+   inside #player-area, not fixed on body: fullscreen is requested on the player
+   area and only its subtree is drawn while fullscreen. */
+#search-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: rgba(0, 0, 0, 0.82);
+  display: flex;
+  justify-content: center;
+  padding: 6vh 24px 4vh;
+}
+
+.so-panel {
+  width: min(960px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+#so-input {
+  width: 100%;
+  background: var(--bg2);
+  border: 2px solid var(--border);
+  border-radius: var(--radius-lg);
+  color: var(--text);
+  font-size: 32px;
+  padding: 16px 24px;
+  outline: none;
+}
+#so-input:focus { border-color: var(--accent); }
+/* The native clear button paints in the OS accent (blue on Windows). */
+#so-input::-webkit-search-cancel-button { appearance: none; }
+
+.so-status {
+  color: var(--text2);
+  font-size: 18px;
+  padding: 0 8px;
+}
+
+#so-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+#so-list:empty { display: none; }
+
+#so-list .channel-item {
+  min-height: 72px;
+  gap: 18px;
+  padding: 10px 24px 10px 21px;
+  border-left-width: 3px;
+}
+#so-list .channel-logo,
+#so-list .channel-logo-placeholder {
+  width: 48px;
+  height: 48px;
+  font-size: 24px;
+}
+#so-list .channel-name { font-size: 24px; -webkit-line-clamp: 1; }
+#so-list .channel-sub { font-size: 17px; margin-top: 2px; }
+#so-list .channel-tag { font-size: 14px; padding: 4px 10px; }
+#so-list .channel-time { font-size: 17px; }
+#so-list .fav-btn { font-size: 24px; padding: 8px; }
+#so-list .series-chevron { font-size: 32px; }
