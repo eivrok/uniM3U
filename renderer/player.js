@@ -126,14 +126,12 @@ export class Player {
       // resuming just re-opens the connection at the new live edge. Left on, it
       // is a second source of the dropped connections this player recovers from.
       lazyLoad: false,
-      // mpegts.js answers a large audio DTS discontinuity by generating one
-      // silent frame per frame of gap. Providers whose stream clock runs on
-      // their own uptime produce corrections of many hours, so the fill runs to
-      // millions of frames and the array is flushed with push.apply — which
-      // overflows the stack. The RangeError surfaces as a network error, the
-      // ladder reloads, and the fresh remuxer reference recreates the same gap.
-      // A gap that size is a reference mismatch, not audio worth filling.
-      fixAudioTimestampGap: false,
+      // Fill audio gaps with silence. Without it, mpegts.js packs audio back to
+      // back across a gap while video keeps its timestamps, so a few seconds of
+      // lost audio leaves the sound that far ahead of the picture. Unpatched,
+      // the fill overflows the stack on providers whose audio clock jumps by
+      // hours; the vendored bundle caps it at 10 s (see player-libs.js).
+      fixAudioTimestampGap: true,
       seekType: 'range',
       // Larger IO buffer reduces stalls on variable-bitrate streams
       stashInitialSize: 1024 * 512,

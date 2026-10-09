@@ -304,14 +304,13 @@ describe('mpegts transmux configuration', () => {
     delete globalThis.window;
   });
 
-  // A provider whose audio DTS runs on its own long-uptime clock produces a
-  // multi-hour dtsCorrection, and mpegts.js answers it by generating one silent
-  // frame per frame of "gap" — millions of them — then flushing the array with
-  // push.apply, which overflows the stack. The thrown RangeError surfaces as a
-  // network error, so the ladder reloads, and the fresh remuxer reference
-  // reproduces the same gap. Filling a gap that large was never meaningful.
-  it('disables silent-frame gap filling, which overflows the stack on live streams', () => {
+  // With gap filling off, mpegts.js packs audio frames back to back across a
+  // gap while video keeps its own timestamps, so a few seconds of lost audio
+  // leaves the sound that far ahead of the picture until the next reload.
+  // The multi-hour gaps that overflowed the stack are excluded by the cap
+  // patched into the vendored bundle (player-libs.js), not by this flag.
+  it('enables silent-frame gap filling so lost audio does not run ahead of the picture', () => {
     player.load('http://example.com:8080/user/pass/145689');
-    expect(config.fixAudioTimestampGap).toBe(false);
+    expect(config.fixAudioTimestampGap).toBe(true);
   });
 });

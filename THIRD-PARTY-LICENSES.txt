@@ -82,7 +82,10 @@ section 5 below.
 
 Copyright (c) zheng qian (magicxqq) <xqq@xqq.im>
 
-Bundled file: renderer/lib/mpegts.js (distribution build, otherwise unmodified).
+Bundled file: renderer/lib/mpegts.js (distribution build). Modified by UniM3U:
+silent-frame filling of audio timestamp gaps is limited to gaps of 10 seconds
+or less. The change is applied at build time by sync-player-libs.js; see the
+patch list in player-libs.js.
 Licensed under the Apache License, Version 2.0; full text in section 5 below.
 
 ================================================================================
