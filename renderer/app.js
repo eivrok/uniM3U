@@ -2,7 +2,7 @@ import { parseM3U, parseM3UProgressive, parseGroup } from './playlist.js';
 import { isCacheFresh, DEFAULT_TTL_HOURS } from './cache-policy.js';
 import { migrateFavorites } from './favorites-migration.js';
 import { toChannels, toEpisodes } from './xtream.js';
-import { formatDownloadProgress } from './format.js';
+import { formatDownloadProgress, normalizeTimeFormat, formatClockTime, formatClockString } from './format.js';
 import { loadEPG, getProgramsForChannel, getCurrentProgram, getNextProgram } from './epg.js';
 import { Player } from './player.js';
 import { clampIdleSeconds, formatIdleLabel, decideChrome } from './idle.js';
@@ -32,6 +32,7 @@ const state = {
   visibleCountries: null,     // null = all visible; otherwise a Set of allowed country names
   tree: null,                 // memoized country tree; rebuilt only when channels reload
   idleHideSeconds: 5,         // seconds of inactivity before chrome hides; 0 = disabled
+  timeFormat: '24h',          // '24h' | '12h'
   xtreamCreds: null,          // {origin, username, password} when the source is Xtream
   episodeCache: new Map(),    // series_id -> episode channel rows, fetched on demand
   episodePending: new Set(),  // series_id currently being fetched — blocks duplicate in-flight requests
@@ -43,6 +44,7 @@ const mainScreen = document.getElementById('main-screen');
 const m3uInput = document.getElementById('m3u-url-input');
 const epgInput = document.getElementById('epg-url-input');
 const cacheTtlSelect = document.getElementById('cache-ttl-select');
+const timeFormatSelect = document.getElementById('time-format-select');
 const fastApiCheck = document.getElementById('fast-api-check');
 const idleHideSlider = document.getElementById('idle-hide-slider');
 const idleHideValue = document.getElementById('idle-hide-value');
@@ -186,7 +188,7 @@ document.addEventListener('fullscreenchange', () => {
 });
 
 function updateClock() {
-  pcClock.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  pcClock.textContent = formatClockTime(new Date(), state.timeFormat);
 }
 updateClock();
 setInterval(updateClock, 15_000);
@@ -297,11 +299,12 @@ async function init() {
     failedLogos: fl,
     cacheTtlHours: ttlH,
     idleHideSeconds: idleH,
+    timeFormat: timeFmt,
     useXtreamApi,
   } = await api.storeGetMany([
     'm3uUrl', 'epgUrl', 'favorites', 'visibleCountries',
     'expandedCountries', 'failedLogos', 'cacheTtlHours', 'idleHideSeconds',
-    'useXtreamApi',
+    'timeFormat', 'useXtreamApi',
   ]);
 
   if (favs) state.favorites = new Set(favs);
@@ -314,6 +317,7 @@ async function init() {
   state.idleHideSeconds = clampIdleSeconds(idleH == null ? 5 : idleH);
   idleHideSlider.value = String(state.idleHideSeconds);
   idleHideValue.textContent = formatIdleLabel(state.idleHideSeconds);
+  applyTimeFormat(timeFmt);
   updateLastDownloadNote();
 
   if (m3uUrl) {
@@ -903,7 +907,7 @@ function buildChannelItem(channel, epgData, { showSource = false } = {}) {
     const timeEl = document.createElement('div');
     timeEl.className = 'channel-time';
     if (label.date) timeEl.appendChild(el('div', 'channel-date', label.date));
-    if (label.time) timeEl.appendChild(el('div', 'channel-clock', label.time));
+    if (label.time) timeEl.appendChild(el('div', 'channel-clock', formatClockString(label.time, state.timeFormat)));
     item.appendChild(timeEl);
   }
 
@@ -1197,9 +1201,26 @@ function buildEpgNext(p) {
   return row;
 }
 
+// Switch the clock and the EPG overlay to the given format. Channel rows are
+// rebuilt by the caller, which knows whether a reload is about to do it anyway.
+function applyTimeFormat(value) {
+  const next = normalizeTimeFormat(value);
+  const changed = next !== state.timeFormat;
+  state.timeFormat = next;
+  timeFormatSelect.value = next;
+  // 12h times are wider; the channel-row time column is sized by this class.
+  document.body.classList.toggle('time-12h', next === '12h');
+  updateClock();
+  if (state.activeChannelId) {
+    const ch = state.channels.find((c) => c.id === state.activeChannelId);
+    if (ch) updateEPGOverlay(ch);
+  }
+  return changed;
+}
+
 function formatTime(ms) {
   if (!ms) return '';
-  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+  return formatClockTime(new Date(ms), state.timeFormat);
 }
 
 function timeRange(p) {
@@ -1253,11 +1274,13 @@ saveBtn.addEventListener('click', async () => {
 
   try {
     state.idleHideSeconds = clampIdleSeconds(idleHideSlider.value);
+    const timeFormatChanged = applyTimeFormat(timeFormatSelect.value);
     const settings = {
       m3uUrl,
       epgUrl: epgUrl || null,
       cacheTtlHours: Number(cacheTtlSelect.value),
       idleHideSeconds: state.idleHideSeconds,
+      timeFormat: state.timeFormat,
       useXtreamApi: fastApiCheck.checked,
     };
     if (apiChanged) {
@@ -1301,6 +1324,9 @@ saveBtn.addEventListener('click', async () => {
       await loadChannels(m3uUrl, epgUrl || null, false);
     }
     // Nothing changed → just return to the player, no download.
+
+    // Channel rows hold provider event times, formatted when the row was built.
+    if (timeFormatChanged) render();
   } catch (err) {
     alert('Error: ' + err.message);
   } finally {
@@ -1316,6 +1342,7 @@ cancelBtn.addEventListener('click', () => {
     epgInput.value = epgUrl || '';
     fastApiCheck.checked = useXtreamApi !== false;
   });
+  timeFormatSelect.value = state.timeFormat;
   showMain();
 });
 

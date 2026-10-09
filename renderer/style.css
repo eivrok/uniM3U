@@ -334,6 +334,7 @@ input:focus-visible,
 }
 .channel-date { font-size: 10px; color: var(--text3); }
 .channel-clock { font-size: 13px; font-weight: 600; color: var(--text2); }
+.time-12h .channel-time { width: 60px; }
 
 .channel-info { flex: 1; min-width: 0; }
 
@@ -1045,5 +1046,6 @@ input:focus-visible,
 #so-list .channel-sub { font-size: 17px; margin-top: 2px; }
 #so-list .channel-tag { font-size: 14px; padding: 4px 10px; }
 #so-list .channel-time { font-size: 17px; }
+.time-12h #so-list .channel-time { width: 80px; }
 #so-list .fav-btn { font-size: 24px; padding: 8px; }
 #so-list .series-chevron { font-size: 32px; }
