@@ -10,6 +10,11 @@ updates:
       dev-dependencies:
         dependency-type: "development"
     open-pull-requests-limit: 10
+    ignore:
+      # v11+ writes a config v8 cannot read, so a rollback bricks installs.
+      # Upgrade needs a migration plan, not a bump. See PR #8 and #45.
+      - dependency-name: "electron-store"
+        update-types: ["version-update:semver-major"]
 
   # Keep GitHub Actions in release.yml current
   - package-ecosystem: "github-actions"
