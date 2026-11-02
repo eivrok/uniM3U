@@ -10,6 +10,8 @@ const { autoUpdater } = require('electron-updater');
 const { shouldAutoUpdate } = require('./updater-policy');
 const { conditionalHeaders } = require('./http-cache-policy');
 const { redirectTarget } = require('./redirect-policy');
+const { lockNavigation } = require('./navigation-policy');
+const { byteBudget } = require('./body-limit');
 const { isXtreamUrl, xtreamCreds, xtreamApiUrl } = require('./xtream-url');
 const { openStore } = require('./store-recovery');
 
@@ -89,6 +91,7 @@ function createWindow() {
     backgroundColor: '#111111',
   });
 
+  lockNavigation(mainWindow.webContents);
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 }
 
@@ -219,6 +222,10 @@ ipcMain.handle('fetch-series-info', async (_event, m3uUrl, seriesId) => {
 // flooding the IPC channel on large playlists.
 const PROGRESS_INTERVAL = 262144; // 256 KB
 
+// Far above any real playlist or Xtream list (the largest seen are tens of MB),
+// and below V8's string limit of roughly 512 MB, which toString() would hit.
+const MAX_BODY_BYTES = 256 * 1024 * 1024;
+
 // An M3U is highly repetitive text and compresses roughly ten to one, but Node
 // neither asks for compression nor decodes it on its own. Servers that don't
 // support this just reply with an identity encoding, so asking costs nothing.
@@ -293,7 +300,21 @@ function fetchFollowRedirects(url, maxRedirects, onProgress, validators) {
       });
       if (inflate) inflate.on('error', reject);
 
-      body.on('data', (chunk) => { chunks.push(chunk); });
+      const takeBytes = byteBudget(MAX_BODY_BYTES);
+      body.on('data', (chunk) => {
+        try {
+          takeBytes(chunk.length);
+        } catch (err) {
+          // Destroying the request stops the download; the 'end' handler
+          // never runs, so nothing further is buffered or resolved.
+          chunks.length = 0;
+          req.destroy();
+          inflate?.destroy();
+          reject(err);
+          return;
+        }
+        chunks.push(chunk);
+      });
       body.on('end', () => {
         onProgress?.(received, total);
         const text = Buffer.concat(chunks).toString('utf8');

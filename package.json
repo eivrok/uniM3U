@@ -40,6 +40,11 @@
     "extraResources": [
       "THIRD-PARTY-LICENSES.txt"
     ],
+    "electronFuses": {
+      "runAsNode": false,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false
+    },
     "mac": {
       "category": "public.app-category.entertainment",
       "target": "dmg",
