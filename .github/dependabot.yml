@@ -15,6 +15,11 @@ updates:
       # Upgrade needs a migration plan, not a bump. See PR #8 and #45.
       - dependency-name: "electron-store"
         update-types: ["version-update:semver-major"]
+      # Electron is the shipped runtime, not just tooling. A major can drop OS
+      # support (44 dropped macOS 12, and Mac users get no in-app warning), so
+      # it is a planned release, not a grouped dev bump.
+      - dependency-name: "electron"
+        update-types: ["version-update:semver-major"]
 
   # Keep GitHub Actions in release.yml current
   - package-ecosystem: "github-actions"
