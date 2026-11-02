@@ -16,7 +16,8 @@ describe('searchChannels', () => {
   });
 
   it('returns nothing for a blank query', () => {
-    expect(searchChannels([ch('NRK1')], '   ', all)).toEqual({ results: [], total: 0 });
+    const { results, total } = searchChannels([ch('NRK1')], '   ', all);
+    expect({ results, total }).toEqual({ results: [], total: 0 });
   });
 
   it('skips channels whose country is hidden', () => {
@@ -34,5 +35,31 @@ describe('searchChannels', () => {
   it('returns every match when no limit is given', () => {
     const channels = Array.from({ length: 300 }, (_, i) => ch(`News ${i}`));
     expect(searchChannels(channels, 'news', all).results).toHaveLength(300);
+  });
+
+  describe('with programmes', () => {
+    const match = { title: 'Live MNF: Newcastle v Everton', start: 2000 };
+    const progs = { 'Sky Sport Main Event': [{ title: 'Build-up', start: 1000 }, match] };
+    const getPrograms = (c) => progs[c.name] ?? [];
+
+    it('matches a channel by the title of one of its programmes', () => {
+      const { results } = searchChannels([ch('Sky Sport Main Event'), ch('NRK1')], 'newc', all, Infinity, getPrograms);
+      expect(results.map((c) => c.name)).toEqual(['Sky Sport Main Event']);
+    });
+
+    it('reports which programme matched, keyed by channel id', () => {
+      const { programHits } = searchChannels([ch('Sky Sport Main Event')], 'newc', all, Infinity, getPrograms);
+      expect(programHits.get('Sky Sport Main Event')).toBe(match);
+    });
+
+    it('records no programme hit when the name already matched', () => {
+      const { programHits } = searchChannels([ch('Sky Sport Main Event')], 'sky', all, Infinity, getPrograms);
+      expect(programHits.size).toBe(0);
+    });
+
+    it('still matches by name when a channel has no programmes', () => {
+      const { results } = searchChannels([ch('NRK1')], 'nrk', all, Infinity, getPrograms);
+      expect(results.map((c) => c.name)).toEqual(['NRK1']);
+    });
   });
 });

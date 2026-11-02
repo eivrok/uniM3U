@@ -11,7 +11,7 @@ import { searchChannels } from './search.js';
  * same channel in the sidebar (play, favourite, open series). The overlay only
  * adds keyboard focus and closes itself once a row is picked.
  */
-export function createSearchOverlay({ root, input, list, status, getChannels, isVisible, buildRow, limit = 100 }) {
+export function createSearchOverlay({ root, input, list, status, getChannels, isVisible, buildRow, getPrograms, limit = 100 }) {
   let focusIndex = -1;
   let renderTimer = null;
 
@@ -42,7 +42,7 @@ export function createSearchOverlay({ root, input, list, status, getChannels, is
     focusIndex = -1;
     list.innerHTML = '';
     const query = input.value;
-    const { results, total } = searchChannels(getChannels(), query, isVisible, limit);
+    const { results, total, programHits } = searchChannels(getChannels(), query, isVisible, limit, getPrograms);
 
     if (!query.trim()) {
       status.textContent = 'Type a channel name';
@@ -55,7 +55,7 @@ export function createSearchOverlay({ root, input, list, status, getChannels, is
     }
 
     const frag = document.createDocumentFragment();
-    results.forEach((c) => frag.appendChild(buildRow(c)));
+    results.forEach((c) => frag.appendChild(buildRow(c, programHits.get(c.id))));
     list.appendChild(frag);
     list.scrollTop = 0;
   }

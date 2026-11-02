@@ -3,7 +3,7 @@ import { isCacheFresh, DEFAULT_TTL_HOURS } from './cache-policy.js';
 import { migrateFavorites } from './favorites-migration.js';
 import { toChannels, toEpisodes } from './xtream.js';
 import { formatDownloadProgress, normalizeTimeFormat, formatClockTime, formatClockString } from './format.js';
-import { loadEPG, getProgramsForChannel, getCurrentProgram, getNextProgram } from './epg.js';
+import { loadEPG, getProgramsForChannel, getCurrentProgram, getNextProgram, getProgramsStartingWithin } from './epg.js';
 import { Player } from './player.js';
 import { clampIdleSeconds, formatIdleLabel, decideChrome } from './idle.js';
 import { parseChannelLabel } from './channel-label.js';
@@ -94,7 +94,8 @@ const searchOverlay = createSearchOverlay({
   status: document.getElementById('so-status'),
   getChannels: () => state.channels,
   isVisible: isCountryVisible,
-  buildRow: (c) => buildChannelItem(c, state.epgData, { showSource: true }),
+  buildRow: (c, programHit) => buildChannelItem(c, state.epgData, { showSource: true, programHit }),
+  getPrograms: (c) => searchablePrograms(c),
 });
 
 // Brand logo — use assets/logo.png if it loads, otherwise fall back to the text.
@@ -681,6 +682,16 @@ const persistFailedLogos = debounce(() => api.storeSet('failedLogos', [...failed
 
 let kbdIndex = -1; // keyboard-focused row in the channel list (-1 = none)
 
+// Search looks ahead so a match is findable from the build-up, not only after
+// kick-off. Three hours covers a pre-match show; anything later is mostly
+// replays and highlights that would crowd out the live game.
+const SEARCH_LOOKAHEAD_MS = 3 * 60 * 60 * 1000;
+
+// Same EPG key the row subtitle uses, so search agrees with what rows show.
+function searchablePrograms(channel) {
+  return getProgramsStartingWithin(state.epgData, channel.tvgId || channel.name, SEARCH_LOOKAHEAD_MS);
+}
+
 function render() {
   cleanupListObserver();
   kbdIndex = -1; // DOM is rebuilt below; drop stale keyboard focus
@@ -689,8 +700,8 @@ function render() {
 
   // Search cuts across all visible channels, ignoring drill/collapse state.
   if (q) {
-    const { results } = searchChannels(state.channels, q, isCountryVisible);
-    renderChannelItems(results, 'No channels match your search', false, { showSource: true });
+    const { results, programHits } = searchChannels(state.channels, q, isCountryVisible, Infinity, searchablePrograms);
+    renderChannelItems(results, 'No channels match your search', false, { showSource: true, programHits });
     return;
   }
 
@@ -819,7 +830,8 @@ function renderChannelItems(list, emptyMsg, append = false, opts = {}) {
   function appendBatch() {
     const batch = list.slice(rendered, rendered + CHUNK_SIZE);
     const frag = document.createDocumentFragment();
-    batch.forEach((c) => frag.appendChild(buildChannelItem(c, state.epgData, opts)));
+    const { programHits, ...rowOpts } = opts;
+    batch.forEach((c) => frag.appendChild(buildChannelItem(c, state.epgData, { ...rowOpts, programHit: programHits?.get(c.id) })));
     const items = [...frag.children];
     channelList.insertBefore(frag, sentinel); // sentinel stays at the bottom
     markTruncatedNames(items);
@@ -868,7 +880,7 @@ function renderHint(msg) {
   channelList.appendChild(hint);
 }
 
-function buildChannelItem(channel, epgData, { showSource = false } = {}) {
+function buildChannelItem(channel, epgData, { showSource = false, programHit = null } = {}) {
   const item = document.createElement('div');
   item.className = 'channel-item';
   if (channel.id === state.activeChannelId) item.classList.add('active');
@@ -929,6 +941,12 @@ function buildChannelItem(channel, epgData, { showSource = false } = {}) {
     subEl.className = 'channel-sub channel-epg-now';
     subEl.textContent = prog.title;
     info.appendChild(subEl);
+  }
+
+  // A search hit on a programme that hasn't started yet: the line above shows
+  // what's on now, so without this the row gives no clue why it matched.
+  if (programHit && programHit.start > Date.now()) {
+    info.appendChild(el('div', 'channel-sub',`${formatTime(programHit.start)} · ${programHit.title}`));
   }
 
   item.appendChild(info);

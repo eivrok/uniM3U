@@ -36,6 +36,12 @@ export function getNextProgram(epgData, channelId) {
   return epgData[channelId].find((p) => p.start > now) || null;
 }
 
+/** The programme on now plus any that start within `windowMs` of `now`. */
+export function getProgramsStartingWithin(epgData, channelId, windowMs, now = Date.now()) {
+  if (!channelId || !epgData[channelId]) return [];
+  return epgData[channelId].filter((p) => p.stop > now && p.start <= now + windowMs);
+}
+
 export function getProgramsForChannel(epgData, channelId, count = 5) {
   if (!channelId || !epgData[channelId]) return [];
   const now = Date.now();
