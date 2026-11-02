@@ -9,6 +9,7 @@ const http = require('http');
 const { autoUpdater } = require('electron-updater');
 const { shouldAutoUpdate } = require('./updater-policy');
 const { conditionalHeaders } = require('./http-cache-policy');
+const { redirectTarget } = require('./redirect-policy');
 const { isXtreamUrl, xtreamCreds, xtreamApiUrl } = require('./xtream-url');
 const { openStore } = require('./store-recovery');
 
@@ -248,10 +249,16 @@ function fetchFollowRedirects(url, maxRedirects, onProgress, validators) {
       },
     }, (res) => {
       if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location && maxRedirects > 0) {
-        const redirectUrl = res.headers.location.startsWith('http')
-          ? res.headers.location
-          : new URL(res.headers.location, url).href;
         res.destroy();
+        // Inside the response callback a throw would escape as an uncaught
+        // exception in the main process, so it has to become a rejection.
+        let redirectUrl;
+        try {
+          redirectUrl = redirectTarget(url, res.headers.location);
+        } catch (err) {
+          reject(err);
+          return;
+        }
         resolve(fetchFollowRedirects(redirectUrl, maxRedirects - 1, onProgress, validators));
         return;
       }
