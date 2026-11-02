@@ -314,3 +314,42 @@ describe('mpegts transmux configuration', () => {
     expect(config.fixAudioTimestampGap).toBe(true);
   });
 });
+
+// Stream urls come from the playlist, which is usually fetched over plain http
+// and so is attacker-controllable. On Windows a file://host/share url becomes
+// a UNC path, and loading it leaks the user's NTLM hash over SMB.
+describe('stream url scheme', () => {
+  let video;
+  let player;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    video = fakeVideo();
+    player = new Player(video, fakeNetwork());
+  });
+
+  afterEach(() => {
+    player._destroy();
+    vi.useRealTimers();
+  });
+
+  it('does not hand a file url to the video element', () => {
+    player.load('file://attacker.example/share/x.mp4');
+    expect(video.src).toBe('');
+  });
+
+  it('does not start playback for a non-http url', () => {
+    player.load('file://attacker.example/share/x.mp4');
+    expect(video.playCount).toBe(0);
+  });
+
+  it('does not schedule recovery for a refused url', () => {
+    player.load('file://attacker.example/share/x.mp4');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('accepts an https url', () => {
+    player.load('https://example.com/movie.mp4');
+    expect(video.src).toBe('https://example.com/movie.mp4');
+  });
+});

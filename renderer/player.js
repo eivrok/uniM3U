@@ -43,6 +43,14 @@ export class Player {
 
   load(url) {
     this._destroy();
+    // Stream urls come from the playlist, often fetched over plain http, so
+    // they are untrusted. On Windows a file://host/share url resolves to a UNC
+    // path and leaks the user's NTLM hash over SMB; nothing legitimate needs
+    // anything but http(s).
+    if (!/^https?:\/\//i.test(url)) {
+      console.warn('Refusing to play a non-http stream url:', redactUrl(url));
+      return;
+    }
     this._url = url;
     // A new channel starts with a clean budget and its own startup grace;
     // a reconnect inherits both from the channel it is recovering.
