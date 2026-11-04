@@ -499,6 +499,17 @@ function asCatalogue(payloads) {
   return { channels, creds: payloads.creds };
 }
 
+// Only the first rows on screen animate, and only right after a load: render()
+// rebuilds the list on every search keystroke, and a stagger there would get
+// in the way. The class lives on the rows, so the next rebuild drops it.
+const BEAM_ROWS = 20;
+function beamInRows() {
+  [...channelList.children].slice(0, BEAM_ROWS).forEach((row, i) => {
+    row.style.setProperty('--beam-i', i);
+    row.classList.add('beam-in');
+  });
+}
+
 async function loadChannels(m3uUrl, epgUrl, forceRefresh = false) {
   loadingMsg.classList.remove('hidden');
   emptyStateText.textContent = 'Loading your channels…';
@@ -622,6 +633,7 @@ async function loadChannels(m3uUrl, epgUrl, forceRefresh = false) {
         playChannel(last);
       }
     }
+    beamInRows();
   } catch (err) {
     showMain();
     alert(`Failed to load playlist: ${err.message}`);

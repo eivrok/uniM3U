@@ -147,7 +147,40 @@
         </div>
         <div id="epg-bar" class="hidden"></div>
         <div id="empty-state">
-          <div class="empty-icon">📺</div>
+          <!-- Idle: screen off. While loading (#empty-state-text.pulsing) the
+               screen powers on into static; see style.css. -->
+          <svg class="empty-tv" viewBox="0 0 120 100" aria-hidden="true">
+            <defs>
+              <clipPath id="tv-screen-clip"><rect x="18" y="28" width="70" height="50" rx="6"/></clipPath>
+              <filter id="tv-noise-filter" x="0" y="0" width="100%" height="100%">
+                <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" stitchTiles="stitch"/>
+                <feColorMatrix type="saturate" values="0"/>
+              </filter>
+            </defs>
+            <g class="tv-signal">
+              <path d="M50 -2 Q58 4 66 -2"/>
+              <path d="M50 -2 Q58 4 66 -2"/>
+              <path d="M50 -2 Q58 4 66 -2"/>
+            </g>
+            <g class="tv-antenna">
+              <path d="M44 6 L58 22 L72 4"/>
+              <circle cx="44" cy="6" r="2"/>
+              <circle cx="72" cy="4" r="2"/>
+            </g>
+            <rect class="tv-body" x="8" y="22" width="104" height="64" rx="10"/>
+            <rect class="tv-screen" x="18" y="28" width="70" height="50" rx="6"/>
+            <g clip-path="url(#tv-screen-clip)">
+              <g class="tv-static">
+                <rect class="tv-noise" x="18" y="28" width="140" height="100" filter="url(#tv-noise-filter)"/>
+                <rect class="tv-roll" x="18" y="28" width="70" height="8"/>
+              </g>
+              <path class="tv-glare" d="M24 34 Q38 31 50 33"/>
+            </g>
+            <circle class="tv-knob" cx="100" cy="40" r="4"/>
+            <circle class="tv-knob" cx="100" cy="54" r="4"/>
+            <circle class="tv-led" cx="100" cy="70" r="2"/>
+            <path class="tv-feet" d="M26 86 L22 94 M94 86 L98 94"/>
+          </svg>
           <p id="empty-state-text">Select a channel to start watching</p>
         </div>
 

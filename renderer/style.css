@@ -718,7 +718,98 @@ input:focus-visible,
   pointer-events: none;
 }
 
-#empty-state .empty-icon { font-size: 64px; opacity: 0.3; }
+/* Empty-state TV. Idle it sits dark and dim; while channels load the screen
+   powers on into rolling static. Keyed off the existing .pulsing class so
+   app.js needs no extra state. Noise is a static SVG turbulence fill that
+   CSS jumps around in steps, so the animation stops with display:none
+   instead of ticking behind the video like SMIL would. */
+.empty-tv {
+  width: 96px;
+  height: 80px;
+  overflow: visible;
+  opacity: 0.45;
+  transition: opacity var(--t-slow);
+}
+.empty-tv .tv-body,
+.empty-tv .tv-knob,
+.empty-tv .tv-antenna,
+.empty-tv .tv-feet {
+  fill: none;
+  stroke: var(--text3);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.empty-tv .tv-antenna circle { fill: var(--text3); stroke: none; }
+.empty-tv .tv-screen { fill: var(--bg2); stroke: var(--border); stroke-width: 1; }
+.empty-tv .tv-glare { fill: none; stroke: #fff; stroke-opacity: 0.08; stroke-width: 2; stroke-linecap: round; }
+.empty-tv .tv-led { fill: var(--accent); opacity: 0.35; }
+.empty-tv .tv-static { opacity: 0; transform-box: fill-box; transform-origin: center; }
+.empty-tv .tv-noise { opacity: 0.55; }
+.empty-tv .tv-roll { fill: #fff; opacity: 0.1; }
+
+#empty-state:has(.pulsing) .empty-tv { opacity: 0.9; }
+#empty-state:has(.pulsing) .tv-static {
+  opacity: 1;
+  animation: tv-power-on 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+#empty-state:has(.pulsing) .tv-noise { animation: tv-noise 0.4s steps(1) infinite; }
+#empty-state:has(.pulsing) .tv-roll { animation: tv-roll 2.4s linear infinite; }
+#empty-state:has(.pulsing) .tv-led { opacity: 1; }
+#empty-state:has(.pulsing) .tv-signal path { animation: tv-signal 1.2s ease-in infinite; }
+#empty-state:has(.pulsing) .tv-signal path:nth-child(2) { animation-delay: 0.4s; }
+#empty-state:has(.pulsing) .tv-signal path:nth-child(3) { animation-delay: 0.8s; }
+
+/* Arcs falling onto the antenna: the app is receiving, which is true. */
+.empty-tv .tv-signal path {
+  fill: none;
+  stroke: var(--text2);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  opacity: 0;
+}
+@keyframes tv-signal {
+  0%   { transform: translateY(-14px); opacity: 0; }
+  40%  { opacity: 0.8; }
+  100% { transform: translateY(10px); opacity: 0; }
+}
+
+/* Channel rows materialise top-down once a load finishes (beamInRows). */
+.beam-in {
+  animation: beam-in 0.28s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation-delay: calc(var(--beam-i, 0) * 18ms);
+}
+@keyframes beam-in {
+  0%   { opacity: 0; transform: translateY(-8px); clip-path: inset(0 0 100% 0); filter: brightness(2.2); }
+  60%  { opacity: 1; filter: brightness(1.4); }
+  100% { opacity: 1; transform: none; clip-path: inset(0 0 0 0); filter: none; }
+}
+
+/* CRT turn-on: a bright horizontal line that opens into the picture. */
+@keyframes tv-power-on {
+  0%   { transform: scale(1, 0.02); filter: brightness(3); }
+  60%  { transform: scale(1, 1);    filter: brightness(1.6); }
+  100% { transform: scale(1, 1);    filter: brightness(1); }
+}
+@keyframes tv-noise {
+  0%   { transform: translate(0, 0); }
+  20%  { transform: translate(-37px, -21px); }
+  40%  { transform: translate(-12px, -44px); }
+  60%  { transform: translate(-58px, -9px); }
+  80%  { transform: translate(-25px, -33px); }
+}
+@keyframes tv-roll {
+  from { transform: translateY(-10px); }
+  to   { transform: translateY(54px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #empty-state:has(.pulsing) .tv-static,
+  #empty-state:has(.pulsing) .tv-noise,
+  #empty-state:has(.pulsing) .tv-roll,
+  #empty-state:has(.pulsing) .tv-signal path,
+  .beam-in { animation: none; }
+}
 
 /* Category group headers */
 .category-header {
