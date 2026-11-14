@@ -52,7 +52,7 @@ export async function parseM3UProgressive(raw, onProgress, chunkSize = 10000) {
 
 function parseExtInf(line, fallbackId) {
   // #EXTINF:-1 tvg-id="..." tvg-name="..." tvg-logo="..." group-title="...",Channel Name
-  const commaIdx = line.lastIndexOf(',');
+  const commaIdx = nameSeparatorIndex(line);
   const name = commaIdx >= 0 ? line.slice(commaIdx + 1).trim() : 'Unknown';
   const attrs = line.slice(0, commaIdx >= 0 ? commaIdx : line.length);
 
@@ -65,6 +65,21 @@ function parseExtInf(line, fallbackId) {
     group: attr(attrs, 'group-title'),
     url: null,
   };
+}
+
+// The name starts after the first comma that is not inside a quoted attribute.
+// Both sides can hold commas of their own — tvg-name="Love, Actually" before
+// it, "Love, Actually (2003)" after it — so neither the first nor the last
+// comma on the line is right. A line whose quotes don't balance has no comma
+// outside quotes at all; the last comma is the best remaining guess.
+function nameSeparatorIndex(line) {
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (ch === '"') inQuotes = !inQuotes;
+    else if (ch === ',' && !inQuotes) return i;
+  }
+  return line.lastIndexOf(',');
 }
 
 // One compiled pattern per attribute name, reused for every channel. Building

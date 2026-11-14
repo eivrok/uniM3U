@@ -37,6 +37,18 @@
       "provider": "github",
       "releaseType": "draft"
     },
+    "files": [
+      "**/*",
+      "!**/*.test.js",
+      "!sync-player-libs.js",
+      "!docs",
+      "!.github",
+      "!.claude",
+      "!.superpowers",
+      "!.impeccable",
+      "!.interface-design",
+      "!mailmap.txt"
+    ],
     "extraResources": [
       "THIRD-PARTY-LICENSES.txt"
     ],

@@ -6,6 +6,7 @@ const Store = require('electron-store');
 const { autoUpdater } = require('electron-updater');
 const { shouldAutoUpdate } = require('./updater-policy');
 const { lockNavigation } = require('./navigation-policy');
+const { withOpenCors } = require('./cors-policy');
 const { fetchFollowRedirects } = require('./fetch-follow-redirects');
 const { isXtreamUrl, xtreamCreds, xtreamApiUrl } = require('./xtream-url');
 const { openStore } = require('./store-recovery');
@@ -34,6 +35,21 @@ if (settingsWereReset) {
 }
 
 let mainWindow;
+
+// Two instances share one profile folder, and each rewrites the settings file
+// and the playlist caches in full, so the second one silently undoes the
+// first one's changes. The lock is per profile folder, so a run with its own
+// --user-data-dir is unaffected.
+const hasInstanceLock = app.requestSingleInstanceLock();
+if (!hasInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  });
+}
 
 // The playlist is cached as its own file rather than inside electron-store.
 // conf (electron-store's backend) re-reads, decrypts and JSON-parses the whole
@@ -105,14 +121,12 @@ function initAutoUpdater() {
 }
 
 app.whenReady().then(() => {
-  // Allow IPTV stream content-type
+  // quit() above is not immediate; without this the losing instance would
+  // still open a window before it exits.
+  if (!hasInstanceLock) return;
+
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-    callback({
-      responseHeaders: {
-        ...details.responseHeaders,
-        'Access-Control-Allow-Origin': ['*'],
-      },
-    });
+    callback({ responseHeaders: withOpenCors(details.responseHeaders) });
   });
 
   migratePlaylistCacheOutOfStore();

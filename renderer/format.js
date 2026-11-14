@@ -36,6 +36,19 @@ function formatHourMinute(hours, minutes, timeFormat) {
   return `${String(hours).padStart(2, '0')}:${mm}`;
 }
 
+/**
+ * A playback position or length as "2:05" or "1:02:05". Anything that is not
+ * a usable number of seconds (NaN before metadata loads) reads as "0:00".
+ */
+export function formatDuration(seconds) {
+  const total = Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : 0;
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const ss = String(total % 60).padStart(2, '0');
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${ss}`;
+  return `${m}:${ss}`;
+}
+
 /** Local time of a Date in the given format. */
 export function formatClockTime(date, timeFormat) {
   return formatHourMinute(date.getHours(), date.getMinutes(), timeFormat);

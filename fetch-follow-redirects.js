@@ -32,6 +32,14 @@ function decompressor(contentEncoding) {
   }
 }
 
+// Guide hosts publish guide.xml.gz as a plain file download: the body is gzip
+// but no Content-Encoding says so, and decoded as text it parses to an empty
+// guide with no error. Neither an M3U nor XML nor JSON can start with the gzip
+// magic bytes, so sniffing them is safe.
+function isGzipFile(buffer) {
+  return buffer.length > 2 && buffer[0] === 0x1f && buffer[1] === 0x8b;
+}
+
 function fetchFollowRedirects(url, maxRedirects, onProgress, validators) {
   return new Promise((resolve, reject) => {
     const client = url.startsWith('https') ? https : http;
@@ -65,6 +73,9 @@ function fetchFollowRedirects(url, maxRedirects, onProgress, validators) {
         return;
       }
       if (res.statusCode !== 200) {
+        // The error page is never read, and an unread body keeps the socket
+        // open until the idle timeout.
+        res.destroy();
         reject(new Error(`HTTP ${res.statusCode} from server`));
         return;
       }
@@ -123,11 +134,21 @@ function fetchFollowRedirects(url, maxRedirects, onProgress, validators) {
       });
       body.on('end', () => {
         onProgress?.(received, total);
-        const text = Buffer.concat(chunks).toString('utf8');
-        resolve({
-          body: text,
+        const finish = (buffer) => resolve({
+          body: buffer.toString('utf8'),
           etag: res.headers.etag || null,
           lastModified: res.headers['last-modified'] || null,
+        });
+        const buffer = Buffer.concat(chunks);
+        if (inflate || !isGzipFile(buffer)) {
+          finish(buffer);
+          return;
+        }
+        // Same decoded-size ceiling as the streamed path: the budget above
+        // only counted the compressed bytes of this body.
+        zlib.gunzip(buffer, { maxOutputLength: MAX_BODY_BYTES }, (err, decoded) => {
+          if (err) reject(err);
+          else finish(decoded);
         });
       });
     });

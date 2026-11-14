@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { formatDownloadProgress, normalizeTimeFormat, formatClockTime, formatClockString } from './format.js';
+import {
+  formatDownloadProgress,
+  normalizeTimeFormat,
+  formatClockTime,
+  formatClockString,
+  formatDuration,
+} from './format.js';
 
 describe('formatDownloadProgress', () => {
   it('shows received, total, and percent when total is known', () => {
@@ -60,5 +66,23 @@ describe('formatClockString', () => {
 
   it('leaves an out-of-range provider time as written', () => {
     expect(formatClockString('25:70', '12h')).toBe('25:70');
+  });
+});
+
+describe('formatDuration', () => {
+  it('shows minutes and seconds for a position under an hour', () => {
+    expect(formatDuration(125)).toBe('2:05');
+  });
+
+  it('adds hours and pads the minutes once past an hour', () => {
+    expect(formatDuration(3725)).toBe('1:02:05');
+  });
+
+  it('drops fractions of a second', () => {
+    expect(formatDuration(59.9)).toBe('0:59');
+  });
+
+  it('shows zero for a value that is not a usable time', () => {
+    expect(formatDuration(NaN)).toBe('0:00');
   });
 });

@@ -543,6 +543,42 @@ input:focus-visible,
   cursor: pointer;
 }
 
+/* Seek bar, for files with a length. It takes the programme title's place:
+   a film has no "on now", and a live channel has nothing to scrub. */
+.pc-seek {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.pc-seek-slider {
+  flex: 1;
+  min-width: 0;
+  height: 4px;
+  appearance: none;
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  outline: none;
+}
+.pc-seek-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  cursor: pointer;
+}
+.pc-time {
+  flex-shrink: 0;
+  font-size: 13px;
+  color: var(--text2);
+  font-variant-numeric: tabular-nums;
+}
+#player-area.seekable .pc-meta,
+#player-area.seekable .np-live { display: none; }
+
 .pc-meta {
   flex: 1;
   min-width: 0;
