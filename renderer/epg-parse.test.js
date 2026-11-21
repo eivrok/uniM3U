@@ -84,3 +84,17 @@ describe('parseXMLTV', () => {
     expect(result.abc[1].desc).toBe('');
   });
 });
+
+describe('parseXMLTV with channel ids that collide with Object.prototype', () => {
+  const programme = (channel) =>
+    `<programme start="20240101120000 +0000" stop="20240101130000 +0000" channel="${channel}"><title>News</title></programme>`;
+
+  it('keeps the programmes of a channel called "constructor"', () => {
+    expect(parseXMLTV(programme('constructor')).constructor[0].title).toBe('News');
+  });
+
+  it('does not fail the whole guide over a channel called "__proto__"', () => {
+    const guide = parseXMLTV(programme('__proto__') + programme('nrk1'));
+    expect(guide.nrk1[0].title).toBe('News');
+  });
+});

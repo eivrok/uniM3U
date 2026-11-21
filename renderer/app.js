@@ -2,13 +2,15 @@ import { parseM3U, parseM3UProgressive, parseGroup } from './playlist.js';
 import { isCacheFresh, DEFAULT_TTL_HOURS } from './cache-policy.js';
 import { migrateFavorites } from './favorites-migration.js';
 import { toChannels, toEpisodes } from './xtream.js';
-import { formatDownloadProgress, normalizeTimeFormat, formatClockTime, formatClockString } from './format.js';
+import { formatDownloadProgress, normalizeTimeFormat, formatClockTime, formatClockString, formatDuration } from './format.js';
 import { loadEPG, getProgramsForChannel, getCurrentProgram, getNextProgram, getProgramsStartingWithin } from './epg.js';
 import { Player } from './player.js';
 import { clampIdleSeconds, formatIdleLabel, decideChrome } from './idle.js';
 import { parseChannelLabel } from './channel-label.js';
 import { searchChannels } from './search.js';
 import { createSearchOverlay } from './search-overlay.js';
+import { freshOrStale } from './stale-fallback.js';
+import { loadLogoFailures, recordLogoFailure, serializeLogoFailures } from './logo-failures.js';
 
 const api = window.api;
 
@@ -188,6 +190,48 @@ document.addEventListener('fullscreenchange', () => {
   pcFullscreen.classList.toggle('active', Boolean(document.fullscreenElement));
 });
 
+// --- Seek bar ---
+// Only for something with a length. Position is tracked in thousandths of the
+// duration so the slider needs no re-ranging when the duration firms up.
+const pcSeek = document.getElementById('pc-seek');
+const pcSeekSlider = document.getElementById('pc-seek-slider');
+const pcElapsed = document.getElementById('pc-elapsed');
+const pcDuration = document.getElementById('pc-duration');
+const SEEK_STEPS = 1000;
+let scrubbing = false;
+
+function updateSeekBar() {
+  const seekable = player.isSeekable();
+  playerArea.classList.toggle('seekable', seekable);
+  pcSeek.classList.toggle('hidden', !seekable);
+  if (!seekable) return;
+  pcDuration.textContent = formatDuration(videoEl.duration);
+  // While the thumb is being dragged it shows where the user is going, not
+  // where playback is; timeupdate must not yank it back.
+  if (scrubbing) return;
+  pcSeekSlider.value = String(Math.round((videoEl.currentTime / videoEl.duration) * SEEK_STEPS));
+  pcElapsed.textContent = formatDuration(videoEl.currentTime);
+}
+
+function scrubTarget() {
+  return (Number(pcSeekSlider.value) / SEEK_STEPS) * videoEl.duration;
+}
+
+videoEl.addEventListener('durationchange', updateSeekBar);
+videoEl.addEventListener('timeupdate', updateSeekBar);
+videoEl.addEventListener('emptied', updateSeekBar);
+
+pcSeekSlider.addEventListener('input', () => {
+  scrubbing = true;
+  pcElapsed.textContent = formatDuration(scrubTarget());
+});
+pcSeekSlider.addEventListener('change', () => {
+  // Seek once on release rather than on every step of the drag, each of
+  // which would be a range request against the provider.
+  if (player.isSeekable()) videoEl.currentTime = scrubTarget();
+  scrubbing = false;
+});
+
 function updateClock() {
   pcClock.textContent = formatClockTime(new Date(), state.timeFormat);
 }
@@ -259,11 +303,27 @@ const toast = document.createElement('div');
 toast.id = 'toast';
 document.body.appendChild(toast);
 
+let toastTimer = null;
+
 function showToast(msg, duration = 3000) {
   toast.textContent = msg;
   toast.classList.add('show');
-  setTimeout(() => toast.classList.remove('show'), duration);
+  // A second toast replaces the first; the first one's timer must not hide it.
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.remove('show'), duration);
 }
+
+// A channel that will not play used to end in a console line and a spinner
+// (or a frozen frame) with nothing to tell the user why.
+player.onFailure = (reason) => {
+  hideSpinner();
+  showToast(
+    reason === 'refused'
+      ? 'This channel has an address the player cannot open'
+      : 'This channel is not responding — try again later',
+    6000,
+  );
+};
 
 // --- Auto-update toast ---
 function showUpdateToast(version) {
@@ -311,7 +371,7 @@ async function init() {
   if (favs) state.favorites = new Set(favs);
   state.visibleCountries = Array.isArray(vis) ? new Set(vis) : null;
   if (Array.isArray(exp)) state.expandedCountries = new Set(exp);
-  if (Array.isArray(fl)) failedLogos = new Set(fl);
+  failedLogos = loadLogoFailures(fl);
   cacheTtlSelect.value = String(ttlH == null ? DEFAULT_TTL_HOURS : ttlH);
   // Unset means on: the fast path is the default, the checkbox is an escape hatch.
   fastApiCheck.checked = useXtreamApi !== false;
@@ -488,6 +548,25 @@ async function loadXtream(m3uUrl, forceRefresh, xtreamCachedAt, ttlH) {
 }
 
 /**
+ * The last copy on disk, for when nothing can be downloaded. Only a copy the
+ * current url produced qualifies: the timestamps and playlistFormat are all
+ * cleared when the url changes, so an old provider's list (and its stored
+ * credentials) can never come back this way. The Xtream copy is preferred
+ * when it was the last source to load successfully.
+ */
+async function readStaleSource({ useXtreamApi, xtreamCachedAt, cachedAt }) {
+  if (useXtreamApi !== false && xtreamCachedAt && (await api.storeGet('playlistFormat')) === 'xtream') {
+    const cached = await api.xtreamCacheRead();
+    if (cached) return { catalogue: asCatalogue(JSON.parse(cached)) };
+  }
+  if (cachedAt) {
+    const raw = await api.cacheRead();
+    if (raw) return { raw };
+  }
+  return null;
+}
+
+/**
  * A panel that answers every catalogue call with an empty list is answering,
  * but has nothing to serve. Treating that as success would leave the user
  * staring at an empty app while their M3U still works, so it is reported as
@@ -510,7 +589,22 @@ function beamInRows() {
   });
 }
 
-async function loadChannels(m3uUrl, epgUrl, forceRefresh = false) {
+// Loads run one at a time. Reload stays clickable during a load and Save can
+// start one while launch is still downloading; two at once interleaved their
+// writes to state.channels and to the caches. A queued load runs after the
+// one in flight instead of being dropped, because it may carry a new url.
+let loadQueue = Promise.resolve();
+
+function loadChannels(m3uUrl, epgUrl, forceRefresh = false) {
+  // runLoad reports its own failures and never rejects, so the chain can't
+  // get stuck behind a failed load.
+  loadQueue = loadQueue.then(() => runLoad(m3uUrl, epgUrl, forceRefresh));
+  return loadQueue;
+}
+
+async function runLoad(m3uUrl, epgUrl, forceRefresh) {
+  // What to put back on screen if this load fails.
+  const previous = { channels: state.channels, xtreamCreds: state.xtreamCreds };
   loadingMsg.classList.remove('hidden');
   emptyStateText.textContent = 'Loading your channels…';
   emptyStateText.classList.add('pulsing');
@@ -569,7 +663,18 @@ async function loadChannels(m3uUrl, epgUrl, forceRefresh = false) {
         const validators = cachedAt && (playlistEtag || playlistLastModified)
           ? { etag: playlistEtag, lastModified: playlistLastModified }
           : null;
-        raw = await downloadPlaylist(m3uUrl, validators);
+        const { value, stale } = await freshOrStale(
+          async () => ({ raw: await downloadPlaylist(m3uUrl, validators) }),
+          () => readStaleSource({ useXtreamApi, xtreamCachedAt, cachedAt }),
+        );
+        if (stale) showToast('Could not refresh — showing the saved channel list', 6000);
+        if (value.catalogue) {
+          state.channels = value.catalogue.channels;
+          state.xtreamCreds = value.catalogue.creds;
+          fromXtream = true;
+        } else {
+          raw = value.raw;
+        }
       }
     }
 
@@ -610,13 +715,7 @@ async function loadChannels(m3uUrl, epgUrl, forceRefresh = false) {
     state.episodeCache.clear();
     state.episodePending.clear();
 
-    // Load EPG in background
-    if (epgUrl) {
-      loadEPG(epgUrl, api.fetchUrl).then((epgData) => {
-        state.epgData = epgData;
-        render();
-      }).catch(() => {});
-    }
+    startEpg(epgUrl);
 
     state.view = 'browse';
     state.activeGroup = null;
@@ -635,13 +734,64 @@ async function loadChannels(m3uUrl, epgUrl, forceRefresh = false) {
     }
     beamInRows();
   } catch (err) {
+    // The list was cleared when the load began. Put the previous channels
+    // back, or a failed reload leaves an empty sidebar next to a list that is
+    // still in memory.
+    state.channels = previous.channels;
+    state.xtreamCreds = previous.xtreamCreds;
+    state.tree = null;
     showMain();
+    render();
     alert(`Failed to load playlist: ${err.message}`);
   } finally {
     loadingText.textContent = 'Loading channels…';
     loadingMsg.classList.add('hidden');
     emptyStateText.textContent = EMPTY_STATE_IDLE;
     emptyStateText.classList.remove('pulsing');
+  }
+}
+
+// --- EPG loading ---
+// The guide covers a day or two, and the app is left running for longer than
+// that, so it is fetched again on a timer rather than only with the playlist.
+const EPG_REFRESH_MS = 6 * 60 * 60 * 1000;
+let epgGeneration = 0;
+let epgRefreshTimer = null;
+
+function startEpg(epgUrl) {
+  clearInterval(epgRefreshTimer);
+  epgRefreshTimer = null;
+  // Any fetch still in flight belongs to the previous url or playlist.
+  epgGeneration += 1;
+  if (!epgUrl) {
+    state.epgData = {};
+    return;
+  }
+  refreshEpg(epgUrl, true);
+  epgRefreshTimer = setInterval(() => refreshEpg(epgUrl, false), EPG_REFRESH_MS);
+}
+
+/**
+ * `initial` is the fetch that follows a playlist load: it repaints the list
+ * and tells the user when the guide fails. A background refresh does neither —
+ * rebuilding the list would throw away the scroll position mid-browse, and a
+ * failed refresh still leaves the previous guide in place.
+ */
+async function refreshEpg(epgUrl, initial) {
+  const generation = epgGeneration;
+  try {
+    const epgData = await loadEPG(epgUrl, api.fetchUrl);
+    if (generation !== epgGeneration) return;
+    // A response that parses to nothing is an error page or an unreadable
+    // file, not a guide. Keep whatever was there before.
+    if (Object.keys(epgData).length === 0) throw new Error('guide contains no programmes');
+    state.epgData = epgData;
+    if (initial) render();
+    const active = state.channels.find((c) => c.id === state.activeChannelId);
+    if (active) updateEPGOverlay(active);
+  } catch (err) {
+    console.warn('tv guide could not be loaded:', err.message);
+    if (initial && generation === epgGeneration) showToast('TV guide could not be loaded');
   }
 }
 
@@ -689,8 +839,8 @@ function getCountryTree() {
 // --- Render ---
 const CHUNK_SIZE = 100;        // channels rendered per incremental batch
 let listObserver = null;       // IntersectionObserver appending the next batch on scroll
-let failedLogos = new Set();   // logo URLs that 404'd — don't re-request on re-render
-const persistFailedLogos = debounce(() => api.storeSet('failedLogos', [...failedLogos]), 1000);
+let failedLogos = new Map();   // logo url -> when it failed; see logo-failures.js
+const persistFailedLogos = debounce(() => api.storeSet('failedLogos', serializeLogoFailures(failedLogos)), 1000);
 
 let kbdIndex = -1; // keyboard-focused row in the channel list (-1 = none)
 
@@ -913,8 +1063,9 @@ function buildChannelItem(channel, epgData, { showSource = false, programHit = n
     img.src = channel.logo;
     img.alt = '';
     img.onerror = () => {
-      failedLogos.add(channel.logo);
-      persistFailedLogos();
+      if (recordLogoFailure(failedLogos, channel.logo, Date.now(), navigator.onLine)) {
+        persistFailedLogos();
+      }
       img.replaceWith(logoPlaceholder());
     };
     item.appendChild(img);
@@ -981,6 +1132,14 @@ function buildChannelItem(channel, epgData, { showSource = false, programHit = n
     chevron.textContent = '›';
     item.appendChild(chevron);
     item.addEventListener('click', () => openSeries(channel));
+    return item;
+  }
+
+  // Episodes exist only in the session's episode cache, never in
+  // state.channels, which is all the Favorites tab can list. A star here
+  // saved a favourite that could not be shown again, so the row has none.
+  if (channel.kind === 'episode') {
+    item.addEventListener('click', () => playChannel(channel));
     return item;
   }
 
@@ -1365,16 +1524,26 @@ saveBtn.addEventListener('click', async () => {
   }
 });
 
-cancelBtn.addEventListener('click', () => {
-  // Restore the inputs to the saved values, discard edits, return to player.
-  api.storeGetMany(['m3uUrl', 'epgUrl', 'useXtreamApi']).then(({ m3uUrl, epgUrl, useXtreamApi }) => {
-    m3uInput.value = m3uUrl || '';
-    epgInput.value = epgUrl || '';
-    fastApiCheck.checked = useXtreamApi !== false;
-  });
+// Puts every settings field back to its saved value. Cancel and Escape both
+// leave without saving, and a field left showing an unsaved edit would be
+// saved by accident the next time the screen is opened.
+async function discardSettingsEdits() {
+  const saved = await api.storeGetMany(['m3uUrl', 'epgUrl', 'useXtreamApi', 'cacheTtlHours']);
+  m3uInput.value = saved.m3uUrl || '';
+  epgInput.value = saved.epgUrl || '';
+  fastApiCheck.checked = saved.useXtreamApi !== false;
+  cacheTtlSelect.value = String(saved.cacheTtlHours == null ? DEFAULT_TTL_HOURS : saved.cacheTtlHours);
+  idleHideSlider.value = String(state.idleHideSeconds);
+  idleHideValue.textContent = formatIdleLabel(state.idleHideSeconds);
   timeFormatSelect.value = state.timeFormat;
+}
+
+function closeSettingsWithoutSaving() {
+  discardSettingsEdits().catch((err) => console.error('could not restore the settings fields:', err));
   showMain();
-});
+}
+
+cancelBtn.addEventListener('click', closeSettingsWithoutSaving);
 
 settingsBtn.addEventListener('click', showSettings);
 
@@ -1425,7 +1594,7 @@ document.addEventListener('keydown', (e) => {
   } else if (!countriesModal.classList.contains('hidden')) {
     closeCountriesModal();
   } else if (!settingsScreen.classList.contains('hidden') && state.channels.length > 0) {
-    showMain();
+    closeSettingsWithoutSaving();
   }
 });
 
@@ -1550,4 +1719,10 @@ setInterval(() => {
   }
 }, 60_000);
 
-init();
+// A failed settings read used to leave a blank window with the reason only in
+// the console. The settings screen is the one place the user can act from.
+init().catch((err) => {
+  console.error('startup failed:', err);
+  showSettings().catch((settingsErr) => console.error('settings screen failed:', settingsErr));
+  showToast(`Could not start: ${err.message}`, 10000);
+});

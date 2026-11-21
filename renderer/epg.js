@@ -24,26 +24,38 @@ function parseInWorker(xml) {
   });
 }
 
+// Channel ids come from the playlist and the guide file. A plain lookup would
+// treat an id like "constructor" as present, because every object inherits
+// that name, and then fail calling array methods on a function.
+function programmesOf(epgData, channelId) {
+  if (!channelId || !Object.hasOwn(epgData, channelId)) return null;
+  return epgData[channelId];
+}
+
 export function getCurrentProgram(epgData, channelId) {
-  if (!channelId || !epgData[channelId]) return null;
+  const programmes = programmesOf(epgData, channelId);
+  if (!programmes) return null;
   const now = Date.now();
-  return epgData[channelId].find((p) => p.start <= now && p.stop > now) || null;
+  return programmes.find((p) => p.start <= now && p.stop > now) || null;
 }
 
 export function getNextProgram(epgData, channelId) {
-  if (!channelId || !epgData[channelId]) return null;
+  const programmes = programmesOf(epgData, channelId);
+  if (!programmes) return null;
   const now = Date.now();
-  return epgData[channelId].find((p) => p.start > now) || null;
+  return programmes.find((p) => p.start > now) || null;
 }
 
 /** The programme on now plus any that start within `windowMs` of `now`. */
 export function getProgramsStartingWithin(epgData, channelId, windowMs, now = Date.now()) {
-  if (!channelId || !epgData[channelId]) return [];
-  return epgData[channelId].filter((p) => p.stop > now && p.start <= now + windowMs);
+  const programmes = programmesOf(epgData, channelId);
+  if (!programmes) return [];
+  return programmes.filter((p) => p.stop > now && p.start <= now + windowMs);
 }
 
 export function getProgramsForChannel(epgData, channelId, count = 5) {
-  if (!channelId || !epgData[channelId]) return [];
+  const programmes = programmesOf(epgData, channelId);
+  if (!programmes) return [];
   const now = Date.now();
-  return epgData[channelId].filter((p) => p.stop > now).slice(0, count);
+  return programmes.filter((p) => p.stop > now).slice(0, count);
 }

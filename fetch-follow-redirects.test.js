@@ -55,4 +55,27 @@ describe('fetchFollowRedirects', () => {
     });
     await expect(fetchFollowRedirects(url, 5, null)).rejects.toThrow(ConnectionLostError);
   }, SETTLE_MS);
+
+  // EPG hosts commonly publish guide.xml.gz as a plain file download: the body
+  // is gzip, but nothing in the headers says so.
+  it('decodes a gzip file served without a content-encoding header', async () => {
+    const url = await serve((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/gzip' });
+      res.end(zlib.gzipSync('<tv></tv>'));
+    });
+    const result = await fetchFollowRedirects(url, 5, null);
+    expect(result.body).toBe('<tv></tv>');
+  }, SETTLE_MS);
+
+  it('closes the connection after an error status instead of leaving the body unread', async () => {
+    let socketClosed;
+    const closed = new Promise((resolve) => { socketClosed = resolve; });
+    const url = await serve((req, res) => {
+      req.socket.on('close', socketClosed);
+      res.writeHead(404, { 'Content-Length': 1000000 });
+      res.write('x'.repeat(1000));
+    });
+    await expect(fetchFollowRedirects(url, 5, null)).rejects.toThrow('HTTP 404');
+    await closed;
+  }, SETTLE_MS);
 });

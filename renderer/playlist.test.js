@@ -96,3 +96,27 @@ describe('parseM3UProgressive', () => {
     expect(channels).toHaveLength(3);
   });
 });
+
+describe('parseM3U with commas', () => {
+  const parseOne = (extinf) => parseM3U(`#EXTM3U\n${extinf}\nhttp://stream/x`)[0];
+
+  it('keeps a comma that is part of the channel name', () => {
+    const channel = parseOne('#EXTINF:-1 tvg-id="x" group-title="Movies",Love, Actually (2003)');
+    expect(channel.name).toBe('Love, Actually (2003)');
+  });
+
+  it('does not split on a comma inside a quoted attribute', () => {
+    const channel = parseOne('#EXTINF:-1 tvg-name="Love, Actually" group-title="Movies, Drama",Love Actually');
+    expect(channel.name).toBe('Love Actually');
+  });
+
+  it('keeps a quoted attribute that contains a comma intact', () => {
+    const channel = parseOne('#EXTINF:-1 tvg-name="Love, Actually" group-title="Movies, Drama",Love Actually');
+    expect(channel.group).toBe('Movies, Drama');
+  });
+
+  it('still finds the name when an attribute has an unbalanced quote', () => {
+    const channel = parseOne('#EXTINF:-1 tvg-name="Broken group-title=Movies,Some Channel');
+    expect(channel.name).toBe('Some Channel');
+  });
+});

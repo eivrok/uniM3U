@@ -7,7 +7,10 @@
  * (numbers) or null, each channel's list sorted by start time.
  */
 export function parseXMLTV(xml) {
-  const result = {};
+  // No prototype: channel ids are untrusted, and on a plain object an id of
+  // "constructor" or "__proto__" resolves to an inherited member instead of
+  // a missing key, which broke the whole guide.
+  const result = Object.create(null);
   const progRe = /<programme\b([^>]*)>([\s\S]*?)<\/programme>/g;
   let m;
   while ((m = progRe.exec(xml)) !== null) {

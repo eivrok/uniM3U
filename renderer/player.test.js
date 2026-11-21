@@ -352,4 +352,104 @@ describe('stream url scheme', () => {
     player.load('https://example.com/movie.mp4');
     expect(video.src).toBe('https://example.com/movie.mp4');
   });
+
+  it('reports a refused url so the caller can tell the user', () => {
+    const reasons = [];
+    player.onFailure = (reason) => reasons.push(reason);
+    player.load('file://attacker.example/share/x.mp4');
+    expect(reasons).toEqual(['refused']);
+  });
+});
+
+describe('container routing', () => {
+  let video;
+  let player;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    video = fakeVideo();
+    player = new Player(video, fakeNetwork());
+  });
+
+  afterEach(() => {
+    player._destroy();
+    vi.useRealTimers();
+  });
+
+  // mpegts.js only demuxes MPEG-TS. Matroska is what most Xtream panels use for
+  // films, and Chromium demuxes it itself.
+  it('plays an mkv file through the video element rather than mpegts.js', () => {
+    player.load('http://example.com/movie/u/p/42.mkv');
+    expect(video.src).toBe('http://example.com/movie/u/p/42.mkv');
+  });
+});
+
+describe('isSeekable', () => {
+  let video;
+  let player;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    video = fakeVideo();
+    player = new Player(video, fakeNetwork());
+  });
+
+  afterEach(() => {
+    player._destroy();
+    vi.useRealTimers();
+  });
+
+  it('is true for a file with a known length', () => {
+    player.load(VOD_URL);
+    video.duration = 5400;
+    expect(player.isSeekable()).toBe(true);
+  });
+
+  it('is false until the length is known', () => {
+    player.load(VOD_URL);
+    video.duration = NaN;
+    expect(player.isSeekable()).toBe(false);
+  });
+
+  it('is false for a stream with no end', () => {
+    player.load(VOD_URL);
+    video.duration = Infinity;
+    expect(player.isSeekable()).toBe(false);
+  });
+
+  it('is false when nothing is loaded', () => {
+    video.duration = 5400;
+    expect(player.isSeekable()).toBe(false);
+  });
+});
+
+describe('giving up', () => {
+  let video;
+  let player;
+  let reasons;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    video = fakeVideo();
+    player = new Player(video, fakeNetwork());
+    reasons = [];
+    player.onFailure = (reason) => reasons.push(reason);
+  });
+
+  afterEach(() => {
+    player._destroy();
+    vi.useRealTimers();
+  });
+
+  it('says nothing while recovery is still being attempted', () => {
+    player.load(VOD_URL);
+    runStallCycle(STARTUP_TIMEOUT_MS, BASE_DELAY_MS);
+    expect(reasons).toEqual([]);
+  });
+
+  it('reports once when the recovery budget is spent', () => {
+    player.load(VOD_URL);
+    vi.advanceTimersByTime(60 * 60 * 1000);
+    expect(reasons).toEqual(['gave-up']);
+  });
 });

@@ -39,6 +39,26 @@ export class Player {
     this._recoveredAt = 0;
     this._lastBufferedEnd = 0;
     this._hasPlayed = false;
+    // Set by the owner to hear about a channel that will not play: 'refused'
+    // (a url this player won't open) or 'gave-up' (recovery budget spent).
+    // Without it both ended in a console line and a frozen picture.
+    this.onFailure = null;
+    // Whether the current hls.js playlist is live. null until the first
+    // playlist loads, and for the other engines.
+    this._hlsLive = null;
+  }
+
+  /**
+   * Whether the picture can be scrubbed. A finite duration alone is not
+   * enough: hls.js reports the end of the sliding window as the duration of a
+   * live stream, and mpegts.js is configured as live and cannot seek at all.
+   */
+  isSeekable() {
+    const { duration } = this.video;
+    if (!Number.isFinite(duration) || duration <= 0) return false;
+    if (this._engine === 'native') return true;
+    if (this._engine === 'hls') return this._hlsLive === false;
+    return false;
   }
 
   load(url) {
@@ -49,6 +69,7 @@ export class Player {
     // anything but http(s).
     if (!/^https?:\/\//i.test(url)) {
       console.warn('Refusing to play a non-http stream url:', redactUrl(url));
+      this.onFailure?.('refused');
       return;
     }
     this._url = url;
@@ -95,6 +116,9 @@ export class Player {
       this._hls.attachMedia(this.video);
       this._hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
         this.video.play().catch(() => {});
+      });
+      this._hls.on(window.Hls.Events.LEVEL_LOADED, (_event, data) => {
+        this._hlsLive = Boolean(data.details.live);
       });
       this._hls.on(window.Hls.Events.ERROR, (_event, data) => {
         if (!data.fatal) return;
@@ -197,6 +221,7 @@ export class Player {
         redactUrl(this._url),
       );
       this._stopStallWatch();
+      this.onFailure?.('gave-up');
       return;
     }
 
@@ -320,6 +345,7 @@ export class Player {
       this._hls.destroy();
       this._hls = null;
     }
+    this._hlsLive = null;
     if (this._mpegts) {
       this._mpegts.destroy();
       this._mpegts = null;
@@ -378,5 +404,5 @@ function isHLS(url) {
 // Containers Chromium plays natively — match on the path, ignoring any query string.
 function isNativeMedia(url) {
   const path = url.split('?')[0].toLowerCase();
-  return /\.(mp4|m4v|mov|webm|ogv|ogg)$/.test(path);
+  return /\.(mp4|m4v|mov|webm|mkv|ogv|ogg)$/.test(path);
 }

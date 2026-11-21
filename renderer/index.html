@@ -130,6 +130,14 @@
               <input type="range" id="pc-volume-slider" class="pc-slider" min="0" max="1" step="0.01" value="1" aria-label="Volume" />
             </div>
 
+            <!-- Films and episodes only: shown in place of the programme
+                 title once the player reports something that can be scrubbed. -->
+            <div id="pc-seek" class="pc-seek hidden">
+              <span id="pc-elapsed" class="pc-time">0:00</span>
+              <input type="range" id="pc-seek-slider" class="pc-seek-slider" min="0" max="1000" step="1" value="0" aria-label="Seek" />
+              <span id="pc-duration" class="pc-time">0:00</span>
+            </div>
+
             <!-- The channel name and LIVE badge already sit in the overlay at
                  the top of the picture, and both fade on the same timer, so the
                  bar carries what's on now rather than a second copy. -->
